@@ -16,6 +16,12 @@ export function hasValue(reading: Reading): reading is KnownReading {
   return reading.type === "temperature" ? reading.celsius !== null : reading.detected !== null;
 }
 
+export type BatteryLevel = "ok" | "low" | "critical";
+
+export function isLowBattery(battery: BatteryLevel): boolean {
+  return battery !== "ok";
+}
+
 export interface DeviceListener {
   id: string;
   label: string;
@@ -28,7 +34,7 @@ export interface Device {
   model: string;
   serialNumber: string;
   firmwareRevision: string;
-  lowBattery: boolean;
+  battery: BatteryLevel;
   missing: boolean;
   listeners: DeviceListener[];
 }

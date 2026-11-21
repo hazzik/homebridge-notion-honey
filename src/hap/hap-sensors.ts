@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Alex Zaytsev
 
 import type { API, Logging, PlatformAccessory, Service } from "homebridge";
-import { hasValue, MANUFACTURER, type Device, type DeviceListener } from "../devices/index.js";
+import { hasValue, isLowBattery, MANUFACTURER, type Device, type DeviceListener } from "../devices/index.js";
 import { HAP_SERVICES, updateReading } from "./services.js";
 
 export class HapSensors {
@@ -127,7 +127,7 @@ export class HapSensors {
       updateReading(svc, this.api.hap, w.l.reading);
       svc.updateCharacteristic(
         Characteristic.StatusLowBattery,
-        device.lowBattery ? BATTERY_LEVEL_LOW : BATTERY_LEVEL_NORMAL,
+        isLowBattery(device.battery) ? BATTERY_LEVEL_LOW : BATTERY_LEVEL_NORMAL,
       );
       svc.updateCharacteristic(Characteristic.StatusFault, device.missing ? GENERAL_FAULT : NO_FAULT);
       svc.updateCharacteristic(Characteristic.StatusActive, !device.missing);

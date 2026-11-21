@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Alex Zaytsev
 
 import type { Listener } from "../notion/index.js";
-import type { Reading } from "./device.js";
+import type { BatteryLevel, Reading } from "./device.js";
 
 // The `definition_id` value of each kind of Notion listener.
 export const KIND = {
@@ -27,6 +27,19 @@ interface ListenerKind {
 
 export function primaryValue(listener: Listener | undefined): string | null {
   return listener?.insights?.primary?.value ?? null;
+}
+
+// The battery values that the Honey app shows with its low and its critical battery icons.
+const BATTERY_LEVELS = new Map<string | null, BatteryLevel>([
+  ["low", "low"],
+  ["low1", "low"],
+  ["low2", "low"],
+  ["critical", "critical"],
+  ["presumed_dead", "critical"],
+]);
+
+export function batteryLevel(battery: Listener | undefined): BatteryLevel {
+  return BATTERY_LEVELS.get(primaryValue(battery)) ?? "ok";
 }
 
 // The Honey app also knows values in which the state is unknown, such as "initializing", "calibrating_init" and

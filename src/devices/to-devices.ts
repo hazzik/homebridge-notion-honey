@@ -3,7 +3,7 @@
 
 import type { Listener, Sensor } from "../notion/index.js";
 import type { Device } from "./device.js";
-import { KIND, LISTENER_KINDS, primaryValue } from "./listener-kinds.js";
+import { batteryLevel, KIND, LISTENER_KINDS, primaryValue } from "./listener-kinds.js";
 
 function cleanName(name: string): string {
   // HomeKit names must start and end with a letter or digit.
@@ -22,11 +22,11 @@ function groupBySensor(listeners: Listener[]): Map<string, Listener[]> {
   );
 }
 
-function sensorStatus(sensor: Sensor, ls: Listener[]): { lowBattery: boolean; missing: boolean } {
+function sensorStatus(sensor: Sensor, ls: Listener[]): Pick<Device, "battery" | "missing"> {
   const battery = ls.find((l) => l.definition_id === KIND.BATTERY);
   const connection = ls.find((l) => l.definition_id === KIND.CONNECTION);
   return {
-    lowBattery: primaryValue(battery) === "low",
+    battery: batteryLevel(battery),
     missing: connection ? primaryValue(connection) !== "not_missing" : Boolean(sensor.missing_at),
   };
 }

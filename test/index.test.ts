@@ -317,18 +317,27 @@ describe("Notion platform", () => {
     );
   });
 
-  it("shows a low battery and an offline sensor as warnings", async () => {
-    notion.setValue("a-battery", "low");
+  it("shows an offline sensor as a fault", async () => {
     notion.listeners.push(listener("c-connection", "sensor-c", KIND.CONNECTION, "missing"));
 
     await homebridge.start(config());
 
-    expect(homebridge.read("Front door", Service.ContactSensor, StatusLowBattery)).toBe(
-      StatusLowBattery.BATTERY_LEVEL_LOW,
-    );
     expect(homebridge.read("Front door", Service.ContactSensor, StatusFault)).toBe(StatusFault.NO_FAULT);
     expect(homebridge.read("Hallway", Service.SmokeSensor, StatusFault)).toBe(StatusFault.GENERAL_FAULT);
   });
+
+  it.each(["low", "low1", "low2", "critical", "presumed_dead"])(
+    "shows the battery value %s as a low battery",
+    async (value) => {
+      notion.setValue("a-battery", value);
+
+      await homebridge.start(config());
+
+      expect(homebridge.read("Front door", Service.ContactSensor, StatusLowBattery)).toBe(
+        StatusLowBattery.BATTERY_LEVEL_LOW,
+      );
+    },
+  );
 
   it("updates states on later polls without adding accessories again", async () => {
     await homebridge.start(config());

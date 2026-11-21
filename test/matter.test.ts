@@ -14,7 +14,7 @@ const POLLS_IN_A_LONG_OUTAGE = 10;
 // Values of the Matter enums SmokeCoAlarm.AlarmState, SmokeCoAlarm.ExpressedState and PowerSource.BatChargeLevel.
 const ALARM_STATE = { NORMAL: 0, CRITICAL: 2 };
 const EXPRESSED_STATE = { NORMAL: 0, SMOKE_ALARM: 1 };
-const BAT_CHARGE_LEVEL = { OK: 0, WARNING: 1 };
+const BAT_CHARGE_LEVEL = { OK: 0, WARNING: 1, CRITICAL: 2 };
 
 // The `name` of each matter.js device type in `api.matter.deviceTypes`.
 const DEVICE_TYPES = {
@@ -354,22 +354,31 @@ describe("Matter", () => {
     expect(homebridge.matter.read("Front door", "temperatureMeasurement")).toEqual({ measuredValue: 2500 });
   });
 
-  it("reports a low battery and an offline sensor", async () => {
-    notion.setValue("a-battery", "low");
+  it("marks an offline sensor as not reachable", async () => {
     notion.listeners.push(listener("c-connection", "sensor-c", KIND.CONNECTION, "missing"));
 
     await homebridge.start(config());
 
-    expect(homebridge.matter.read("Front door", "powerSource")).toMatchObject({
-      batChargeLevel: BAT_CHARGE_LEVEL.WARNING,
-      batReplacementNeeded: true,
-    });
-    expect(homebridge.matter.read("Laundry", "powerSource")).toMatchObject({
-      batChargeLevel: BAT_CHARGE_LEVEL.OK,
-      batReplacementNeeded: false,
-    });
     expect(homebridge.matter.read("Front door", "bridgedDeviceBasicInformation")).toEqual({ reachable: true });
     expect(homebridge.matter.read("Hallway", "bridgedDeviceBasicInformation")).toEqual({ reachable: false });
+  });
+
+  it.each([
+    { value: "high", level: "OK" },
+    { value: "low", level: "WARNING" },
+    { value: "low1", level: "WARNING" },
+    { value: "low2", level: "WARNING" },
+    { value: "critical", level: "CRITICAL" },
+    { value: "presumed_dead", level: "CRITICAL" },
+  ] as const)("reports the battery value $value as the charge level $level", async ({ value, level }) => {
+    notion.setValue("a-battery", value);
+
+    await homebridge.start(config());
+
+    expect(homebridge.matter.read("Front door", "powerSource")).toMatchObject({
+      batChargeLevel: BAT_CHARGE_LEVEL[level],
+      batReplacementNeeded: level !== "OK",
+    });
   });
 
   it.each([

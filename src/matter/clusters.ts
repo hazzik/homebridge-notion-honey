@@ -2,7 +2,14 @@
 // Copyright (C) 2026 Alex Zaytsev
 
 import type { MatterAccessory, MatterAPI } from "homebridge";
-import { hasValue, type Device, type KnownReading, type Reading } from "../devices/index.js";
+import {
+  hasValue,
+  isLowBattery,
+  type BatteryLevel,
+  type Device,
+  type KnownReading,
+  type Reading,
+} from "../devices/index.js";
 
 type Clusters = NonNullable<MatterAccessory["clusters"]>;
 
@@ -16,9 +23,15 @@ export const DEVICE_TYPES = {
 // Values of the Matter enums PowerSource.PowerSourceStatus, PowerSource.BatChargeLevel,
 // SmokeCoAlarm.AlarmState and SmokeCoAlarm.ExpressedState. `api.matter.types` does not export these enums.
 const POWER_SOURCE_STATUS = { ACTIVE: 1 } as const;
-const BAT_CHARGE_LEVEL = { OK: 0, WARNING: 1 } as const;
+const BAT_CHARGE_LEVEL = { OK: 0, WARNING: 1, CRITICAL: 2 } as const;
 const ALARM_STATE = { NORMAL: 0, CRITICAL: 2 } as const;
 const EXPRESSED_STATE = { NORMAL: 0, SMOKE_ALARM: 1 } as const;
+
+const CHARGE_LEVELS = {
+  ok: BAT_CHARGE_LEVEL.OK,
+  low: BAT_CHARGE_LEVEL.WARNING,
+  critical: BAT_CHARGE_LEVEL.CRITICAL,
+} as const satisfies Record<BatteryLevel, number>;
 
 // Matter takes a null temperature, but it has no unknown state for a contact, leak or smoke sensor.
 export function hasMatterValue(reading: Reading): reading is KnownReading | Extract<Reading, { type: "temperature" }> {
@@ -55,8 +68,8 @@ export function batteryClusters(device: Device): Clusters {
       status: POWER_SOURCE_STATUS.ACTIVE,
       order: 0,
       description: "Battery",
-      batChargeLevel: device.lowBattery ? BAT_CHARGE_LEVEL.WARNING : BAT_CHARGE_LEVEL.OK,
-      batReplacementNeeded: device.lowBattery,
+      batChargeLevel: CHARGE_LEVELS[device.battery],
+      batReplacementNeeded: isLowBattery(device.battery),
     },
   };
 }
