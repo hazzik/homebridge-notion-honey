@@ -52,6 +52,7 @@ export class FakeNotion {
   tokenTtlSeconds = 3600;
   celsius = true;
   down = false;
+  preferencesDown = false;
   sensors: Sensor[] = [];
   listeners: Listener[] = [];
   readonly requests: string[] = [];
@@ -98,6 +99,7 @@ export class FakeNotion {
     if (path === "/sensors") return [200, { sensors: this.sensors }];
     if (path === "/sensor/listeners") return [200, { listeners: this.listeners }];
     if (path === `/users/${this.userUuid}/user_preferences`) {
+      if (this.preferencesDown) return error(503, "Service unavailable");
       return [200, { user_preferences: { celsius_enabled: this.celsius } }];
     }
     return error(404, "Not found");

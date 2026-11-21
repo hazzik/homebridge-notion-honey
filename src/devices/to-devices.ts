@@ -40,7 +40,7 @@ function sensorInfo(sensor: Sensor): Pick<Device, "name" | "model" | "serialNumb
   };
 }
 
-function toDevice(sensor: Sensor, bySensor: Map<string, Listener[]>, celsius: boolean): Device | null {
+function toDevice(sensor: Sensor, bySensor: Map<string, Listener[]>, celsius: boolean | null): Device | null {
   if (!sensor?.uuid) return null;
   const ls = bySensor.get(String(sensor.uuid)) || bySensor.get(String(sensor.id)) || [];
   const listeners = ls.flatMap((l) => {
@@ -52,7 +52,7 @@ function toDevice(sensor: Sensor, bySensor: Map<string, Listener[]>, celsius: bo
 }
 
 // Leaves out the sensors that have no listener of a kind in `LISTENER_KINDS`.
-export function toDevices(sensors: Sensor[], listeners: Listener[], celsius: boolean): Device[] {
+export function toDevices(sensors: Sensor[], listeners: Listener[], celsius: boolean | null): Device[] {
   const bySensor = groupBySensor(listeners);
   return sensors.flatMap((sensor) => {
     const device = toDevice(sensor, bySensor, celsius);

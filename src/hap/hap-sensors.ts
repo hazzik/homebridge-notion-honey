@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Alex Zaytsev
 
 import type { API, Logging, PlatformAccessory, Service } from "homebridge";
-import { MANUFACTURER, type Device } from "../devices/index.js";
-import { HAP_SERVICES, updateReading } from "./services.js";
+import { MANUFACTURER, type Device, type DeviceListener } from "../devices/index.js";
+import { HAP_SERVICES, hasValue, updateReading } from "./services.js";
 
 export class HapSensors {
   private readonly log: Logging;
@@ -32,7 +32,9 @@ export class HapSensors {
     const changed: PlatformAccessory[] = [];
 
     for (const device of devices) {
-      const { acc, isNew, dirty } = this.syncSensor(device);
+      const synced = this.syncSensor(device);
+      if (!synced) continue;
+      const { acc, isNew, dirty } = synced;
       activeUuids.add(acc.UUID);
       if (isNew) {
         added.push(acc);
@@ -52,20 +54,33 @@ export class HapSensors {
 
   // Homebridge rewrites its whole cache file each time the plugin calls `registerPlatformAccessories` or
   // `updatePlatformAccessories`. `dirty` is true when this poll changed a value that the cache stores.
-  private syncSensor(device: Device): { acc: PlatformAccessory; isNew: boolean; dirty: boolean } {
+  // Returns undefined when the sensor has no service to show yet.
+  private syncSensor(device: Device): { acc: PlatformAccessory; isNew: boolean; dirty: boolean } | undefined {
     const uuid = this.api.hap.uuid.generate(`notion-sensor:${device.uuid}`);
     let acc = this.accessories.get(uuid);
+    const listeners = this.shownListeners(acc, device);
+    if (!listeners.length) return undefined;
     const isNew = !acc;
     if (!acc) {
       acc = new this.api.platformAccessory(device.name, uuid);
       this.accessories.set(uuid, acc);
-      const tasks = device.listeners.map((l) => l.label).join(", ");
+      const tasks = listeners.map((l) => l.label).join(", ");
       this.log.info(`The plugin added "${device.name}" to HomeKit with these tasks: ${tasks}.`);
     }
 
     const infoChanged = this.updateInfo(acc, device);
-    const servicesChanged = this.updateServices(acc, device);
+    const servicesChanged = this.updateServices(acc, device, listeners);
     return { acc, isNew, dirty: infoChanged || servicesChanged };
+  }
+
+  // A new service would show the default value of its characteristic, such as 0 °C, so the plugin adds the service
+  // of a listener only once the listener has a value.
+  private shownListeners(acc: PlatformAccessory | undefined, device: Device): DeviceListener[] {
+    return device.listeners.filter((l) => hasValue(l.reading) || acc?.getServiceById(this.serviceType(l), l.id));
+  }
+
+  private serviceType(listener: DeviceListener): typeof Service.ContactSensor {
+    return this.api.hap.Service[HAP_SERVICES[listener.reading.type]];
   }
 
   private updateInfo(acc: PlatformAccessory, device: Device): boolean {
@@ -85,11 +100,11 @@ export class HapSensors {
     return dirty;
   }
 
-  private updateServices(acc: PlatformAccessory, device: Device): boolean {
-    const { Service, Characteristic } = this.api.hap;
+  private updateServices(acc: PlatformAccessory, device: Device, listeners: DeviceListener[]): boolean {
+    const { Characteristic } = this.api.hap;
     const { BATTERY_LEVEL_LOW, BATTERY_LEVEL_NORMAL } = Characteristic.StatusLowBattery;
     const { GENERAL_FAULT, NO_FAULT } = Characteristic.StatusFault;
-    const wanted = device.listeners.map((l) => ({ l, type: Service[HAP_SERVICES[l.reading.type]] }));
+    const wanted = listeners.map((l) => ({ l, type: this.serviceType(l) }));
     let dirty = false;
 
     // Remove the services whose listener is gone from the app or now has another type.
@@ -109,7 +124,7 @@ export class HapSensors {
         svc.setCharacteristic(Characteristic.ConfiguredName, name);
         dirty = true;
       }
-      updateReading(svc, Characteristic, w.l.reading);
+      updateReading(svc, this.api.hap, w.l.reading);
       svc.updateCharacteristic(
         Characteristic.StatusLowBattery,
         device.lowBattery ? BATTERY_LEVEL_LOW : BATTERY_LEVEL_NORMAL,

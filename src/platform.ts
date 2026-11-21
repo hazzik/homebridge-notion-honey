@@ -36,8 +36,10 @@ export class NotionPlatform implements DynamicPlatformPlugin {
   private polling = false;
   private failures = 0;
   private authBlockedUntil = 0;
-  private celsius = true;
+  // The temperature unit of the account. It is null until the plugin reads the account preferences.
+  private celsius: boolean | null = null;
   private prefsFetchedAt = 0;
+  private warnedUnitUnknown = false;
 
   constructor(log: Logging, config: NotionConfig, api: API) {
     this.log = log;
@@ -84,10 +86,7 @@ export class NotionPlatform implements DynamicPlatformPlugin {
       const [sensors, listeners, prefs] = await Promise.all([
         client.getSensors(),
         client.getListeners(),
-        prefsDue &&
-          client.getPreferences().catch((e) => {
-            this.log.debug(`The plugin could not read the account preferences: ${(e as Error).message}`);
-          }),
+        prefsDue && client.getPreferences().catch((e) => this.logPreferencesError(e as Error)),
       ]);
       if (prefs) {
         if (typeof prefs.celsius_enabled === "boolean") this.celsius = prefs.celsius_enabled;
@@ -102,6 +101,16 @@ export class NotionPlatform implements DynamicPlatformPlugin {
     } finally {
       this.polling = false;
     }
+  }
+
+  private logPreferencesError(e: Error): void {
+    const message = `The plugin could not read the account preferences: ${e.message}`;
+    if (this.celsius !== null || this.warnedUnitUnknown) {
+      this.log.debug(message);
+      return;
+    }
+    this.warnedUnitUnknown = true;
+    this.log.warn(`${message}. Temperature sensors show no reading until the plugin reads the temperature unit.`);
   }
 
   private handlePollError(e: unknown): void {

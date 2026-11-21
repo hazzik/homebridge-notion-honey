@@ -9,7 +9,7 @@ import configSchema from "../config.schema.json" with { type: "json" };
 import plugin from "../src/index.js";
 import { API_BASE, FakeNotion, KIND, listener, sensor } from "./fake-notion.js";
 
-const { Accessory, Characteristic, Service } = hap;
+const { Accessory, Characteristic, HAPStatus, Service } = hap;
 const { ContactSensorState, LeakDetected, SmokeDetected, StatusFault, StatusLowBattery } = Characteristic;
 
 const POLL_MS = configSchema.schema.properties.pollSeconds.minimum * 1000;
@@ -80,13 +80,21 @@ class FakeHomebridge {
     );
   }
 
+  characteristic(
+    name: string,
+    service: WithUUID<typeof hap.Service>,
+    characteristic: WithUUID<new () => hap.Characteristic>,
+  ): hap.Characteristic | undefined {
+    const acc = [...this.accessories.values()].find((a) => a.displayName === name);
+    return acc?.getService(service)?.getCharacteristic(characteristic);
+  }
+
   read(
     name: string,
     service: WithUUID<typeof hap.Service>,
     characteristic: WithUUID<new () => hap.Characteristic>,
   ): CharacteristicValue | null | undefined {
-    const acc = [...this.accessories.values()].find((a) => a.displayName === name);
-    return acc?.getService(service)?.getCharacteristic(characteristic).value;
+    return this.characteristic(name, service, characteristic)?.value;
   }
 
   // The StatusFault values of all sensor services, without repeats.
@@ -201,6 +209,45 @@ describe("Notion platform", () => {
     await homebridge.start(config());
 
     expect(homebridge.read("Front door", Service.TemperatureSensor, Characteristic.CurrentTemperature)).toBe(25);
+  });
+
+  it("shows no temperature until it reads the temperature unit of the account", async () => {
+    notion.celsius = false;
+    notion.preferencesDown = true;
+    notion.setValue("a-temperature", "inside", "77°");
+
+    await homebridge.start(config());
+    expect(homebridge.services()["Front door"]).toEqual(["ContactSensor"]);
+    expect(homebridge.log.warn).toHaveBeenCalledWith(expect.stringContaining("temperature unit"));
+
+    notion.preferencesDown = false;
+    await nextPoll();
+    expect(homebridge.read("Front door", Service.TemperatureSensor, Characteristic.CurrentTemperature)).toBe(25);
+  });
+
+  it("adds a temperature tile only with its first reading", async () => {
+    notion.setValue("a-temperature", "inside", "--");
+
+    await homebridge.start(config());
+    expect(homebridge.services()["Front door"]).toEqual(["ContactSensor"]);
+
+    notion.setValue("a-temperature", "inside", "21°");
+    await nextPoll();
+    expect(homebridge.read("Front door", Service.TemperatureSensor, Characteristic.CurrentTemperature)).toBe(21);
+  });
+
+  it("shows an error on a temperature tile that loses its reading", async () => {
+    await homebridge.start(config());
+
+    notion.setValue("a-temperature", "inside", "--");
+    await nextPoll();
+
+    const temperature = homebridge.characteristic(
+      "Front door",
+      Service.TemperatureSensor,
+      Characteristic.CurrentTemperature,
+    );
+    expect(temperature?.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
   it("shows a low battery and an offline sensor as warnings", async () => {

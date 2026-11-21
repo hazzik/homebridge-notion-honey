@@ -21,7 +21,8 @@ export const KIND = {
 
 interface ListenerKind {
   label: string;
-  read(listener: Listener, celsius: boolean): Reading;
+  // `celsius` is null when the plugin does not know the temperature unit of the account.
+  read(listener: Listener, celsius: boolean | null): Reading;
 }
 
 export function primaryValue(listener: Listener | undefined): string | null {
@@ -32,11 +33,11 @@ function contactSensor(label: string): ListenerKind {
   return { label, read: (l) => ({ type: "contact", detected: primaryValue(l) !== "open" }) };
 }
 
-function temperature(listener: Listener, celsius: boolean): number | null {
+function temperature(listener: Listener, celsius: boolean | null): number | null {
   // The API returns the temperature only as text, such as "24°", in the unit that the account uses.
   const text = listener.status_localized?.state;
   const match = typeof text === "string" ? text.match(/-?\d+(?:\.\d+)?/) : null;
-  if (!match) return null;
+  if (!match || celsius === null) return null;
   const value = parseFloat(match[0]);
   return celsius ? value : ((value - 32) * 5) / 9;
 }
