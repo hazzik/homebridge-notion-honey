@@ -4,10 +4,17 @@ import * as hap from "@homebridge/hap-nodejs";
 import type { CharacteristicValue, WithUUID } from "@homebridge/hap-nodejs";
 import type { API, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformPluginConstructor } from "homebridge";
 import { EventEmitter } from "node:events";
+import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import configSchema from "../config.schema.json" with { type: "json" };
 import plugin from "../src/index.js";
+import { CONNECT_WAIT_MS, RETRY_FIRST_MS, RETRY_MAX_MS } from "../src/notion/push/push-updates.js";
 import { API_BASE, FakeNotion, KIND, listener, sensor } from "./fake-notion.js";
+import { google, type PushReceiver } from "./fake-push.js";
+
+vi.mock("@eneris/push-receiver", () => import("./fake-push.js"));
 
 const { Accessory, Characteristic, HAPStatus, Service } = hap;
 const { ContactSensorState, LeakDetected, SmokeDetected, StatusFault, StatusLowBattery } = Characteristic;
@@ -35,6 +42,7 @@ class FakeHomebridge {
     this.api = Object.assign(new EventEmitter(), {
       hap,
       platformAccessory: Accessory,
+      user: { storagePath: () => storagePath },
       ...(hasIsHapEnabled ? { isHapEnabled: () => true } : {}),
       registerPlatform: vi.fn<(name: string, platform: PlatformPluginConstructor) => void>(),
       registerPlatformAccessories: (_plugin: string, _platform: string, added: hap.Accessory[]) => {
@@ -109,6 +117,8 @@ class FakeHomebridge {
 
 let notion: FakeNotion;
 let homebridge: FakeHomebridge;
+// The storage folder of Homebridge, which every FakeHomebridge in a test shares.
+let storagePath: string;
 
 function config(): Record<string, unknown> {
   return { email: notion.email, password: notion.password, apiBase: API_BASE, pollSeconds: POLL_MS / 1000 };
@@ -119,7 +129,8 @@ async function nextPoll(): Promise<void> {
 }
 
 beforeEach(() => {
-  vi.useFakeTimers();
+  // The plugin waits with `setTimeout` from node:timers/promises, which Vitest fakes only with `fakeNodeBuiltins`.
+  vi.useFakeTimers({ fakeNodeBuiltins: true });
   notion = new FakeNotion();
   notion.sensors = [
     sensor(101, "sensor-a", "Front door"),
@@ -138,6 +149,8 @@ beforeEach(() => {
     listener("d-battery", "sensor-d", KIND.BATTERY, "high"),
   ];
   vi.stubGlobal("fetch", notion.fetch);
+  google.reset();
+  storagePath = mkdtempSync(join(tmpdir(), "notion-homebridge-"));
   homebridge = new FakeHomebridge();
 });
 
@@ -145,6 +158,7 @@ afterEach(() => {
   homebridge.stop();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  rmSync(storagePath, { recursive: true, force: true });
 });
 
 describe("Notion platform", () => {
@@ -363,5 +377,196 @@ describe("Notion platform", () => {
 
     expect(homebridge.log.error).toHaveBeenCalled();
     expect(notion.requests).toEqual([]);
+  });
+});
+
+describe("Push updates", () => {
+  function pushConfig(): Record<string, unknown> {
+    return { ...config(), push: true };
+  }
+
+  // The fake PushReceiver that the plugin created last.
+  function receiver(): PushReceiver {
+    const last = google.receivers.at(-1);
+    if (!last) throw new Error("The plugin created no PushReceiver");
+    return last;
+  }
+
+  // The plugin reads and writes the saved phone with real file I/O, which fake timers do not wait for.
+  async function phonesRegistered(count = 1): Promise<void> {
+    await vi.waitFor(() => expect(notion.devices).toHaveLength(count));
+  }
+
+  function warnings(text: string): string[] {
+    return homebridge.log.warn.mock.calls.map(([message]) => String(message)).filter((m) => m.includes(text));
+  }
+
+  async function pushOff(count: number): Promise<void> {
+    await vi.waitFor(() => expect(warnings("Push updates are off")).toHaveLength(count));
+  }
+
+  it("registers a phone with the account", async () => {
+    await homebridge.start(pushConfig());
+    await phonesRegistered();
+
+    expect(notion.devices[0]).toEqual({
+      token: receiver().fcmToken,
+      app_version: "25.2.1",
+      os_version: "35",
+      device_id: expect.stringMatching(/^[0-9a-f]{32}$/) as string,
+      platform: "android",
+    });
+    expect(homebridge.log.info).toHaveBeenCalledWith(expect.stringContaining("Push updates are on"));
+  });
+
+  it("does not register a phone when the setting is off", async () => {
+    await homebridge.start(config());
+    await nextPoll();
+
+    expect(google.receivers).toEqual([]);
+    expect(notion.count("POST /devices")).toBe(0);
+  });
+
+  it("checks the service as soon as a push alert arrives", async () => {
+    await homebridge.start(pushConfig());
+    await phonesRegistered();
+    const checks = notion.count("GET /sensors");
+
+    notion.setValue("a-door", "open");
+    receiver().push({ alert: "Front door opened" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(notion.count("GET /sensors")).toBe(checks + 1);
+    expect(homebridge.read("Front door", Service.ContactSensor, ContactSensorState)).toBe(
+      ContactSensorState.CONTACT_NOT_DETECTED,
+    );
+  });
+
+  it("checks the service once more when push alerts arrive during a check", async () => {
+    await homebridge.start(pushConfig());
+    await phonesRegistered();
+    const checks = notion.count("GET /sensors");
+
+    receiver().push({ alert: "Front door opened" });
+    receiver().push({ alert: "Front door closed" });
+    receiver().push({ alert: "Front door opened" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(notion.count("GET /sensors")).toBe(checks + 2);
+  });
+
+  it("moves the regular check a full interval after a push alert", async () => {
+    await homebridge.start(pushConfig());
+    await phonesRegistered();
+    receiver().push({ alert: "Front door opened" });
+    await vi.advanceTimersByTimeAsync(0);
+    const checks = notion.count("GET /sensors");
+
+    await vi.advanceTimersByTimeAsync(POLL_MS - 1);
+    expect(notion.count("GET /sensors")).toBe(checks);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(notion.count("GET /sensors")).toBe(checks + 1);
+  });
+
+  it("stays the same phone after a restart", async () => {
+    await homebridge.start(pushConfig());
+    await phonesRegistered();
+    await vi.waitFor(() => expect(readdirSync(storagePath)).toHaveLength(1));
+    homebridge.stop();
+
+    const restarted = new FakeHomebridge();
+    await restarted.start(pushConfig());
+    await phonesRegistered(2);
+    restarted.stop();
+
+    expect(google.registrations).toBe(1);
+    expect(notion.devices[1]).toEqual(notion.devices[0]);
+    const [file] = readdirSync(storagePath);
+    expect(statSync(join(storagePath, file)).mode & 0o777).toBe(0o600);
+  });
+
+  it.each([
+    { failure: "Google rejects the phone", setUp: () => (google.failing = true) },
+    { failure: "the account does not register the phone", setUp: () => (notion.devicesDown = true) },
+    { failure: "a reconnect to Google fails", setUp: () => {} },
+  ])("keeps checking the service when $failure", async ({ failure, setUp }) => {
+    setUp();
+    await homebridge.start(pushConfig());
+    if (failure === "a reconnect to Google fails") {
+      await phonesRegistered();
+      google.failing = true;
+      receiver().dropConnection();
+    }
+
+    await pushOff(1);
+    const checks = notion.count("GET /sensors");
+    await nextPoll();
+
+    expect(notion.count("GET /sensors")).toBe(checks + 1);
+    expect(receiver().destroyed).toBe(true);
+  });
+
+  it("starts push again after a failure, and doubles the wait after each failure", async () => {
+    google.failing = true;
+    await homebridge.start(pushConfig());
+    await pushOff(1);
+
+    await vi.advanceTimersByTimeAsync(RETRY_FIRST_MS);
+    await pushOff(2);
+    expect(warnings(`tries again in ${(RETRY_FIRST_MS * 2) / 60000} minutes`)).toHaveLength(1);
+
+    google.failing = false;
+    await vi.advanceTimersByTimeAsync(RETRY_FIRST_MS * 2);
+    await phonesRegistered();
+  });
+
+  it("waits at most the longest wait between tries", async () => {
+    google.failing = true;
+    await homebridge.start(pushConfig());
+
+    // Each step lets at least one more try fail. With these steps, a wait that kept doubling would pass the longest wait.
+    const steps = Math.ceil(Math.log2(RETRY_MAX_MS / RETRY_FIRST_MS)) + 2;
+    for (let step = 1; step <= steps; step++) {
+      await vi.waitFor(() => expect(warnings("Push updates are off").length).toBeGreaterThanOrEqual(step));
+      await vi.advanceTimersByTimeAsync(RETRY_MAX_MS);
+    }
+
+    const minutes = warnings("tries again in").map((m) => Number(/tries again in (\d+) minutes/.exec(m)?.[1]));
+    expect(Math.max(...minutes)).toBe(RETRY_MAX_MS / 60000);
+    expect(minutes.at(-1)).toBe(RETRY_MAX_MS / 60000);
+  });
+
+  it("starts push again when the connection to Google is not ready in time", async () => {
+    google.reachable = false;
+    await homebridge.start(pushConfig());
+    await vi.waitFor(() => expect(google.receivers).toHaveLength(1));
+
+    receiver().dropConnection();
+    await vi.advanceTimersByTimeAsync(CONNECT_WAIT_MS);
+    await pushOff(1);
+    expect(warnings("mtalk.google.com")).toHaveLength(1);
+    expect(receiver().destroyed).toBe(true);
+
+    google.reachable = true;
+    await vi.advanceTimersByTimeAsync(RETRY_FIRST_MS);
+    await phonesRegistered();
+  });
+
+  it("stops push when Homebridge shuts down", async () => {
+    google.failing = true;
+    await homebridge.start(pushConfig());
+    await pushOff(1);
+    google.failing = false;
+    google.reachable = false;
+    await vi.advanceTimersByTimeAsync(RETRY_FIRST_MS);
+    await vi.waitFor(() => expect(google.receivers).toHaveLength(2));
+
+    homebridge.stop();
+    await vi.advanceTimersByTimeAsync(RETRY_MAX_MS);
+
+    expect(receiver().destroyed).toBe(true);
+    expect(google.receivers).toHaveLength(2);
+    expect(warnings("Push updates are off")).toHaveLength(1);
   });
 });

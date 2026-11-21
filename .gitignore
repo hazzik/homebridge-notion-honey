@@ -155,3 +155,6 @@ vite.config.ts.timestamp-*
 .nx/cache
 .nx/workspace-data
 .nx/migrate-runs
+
+# Push credentials that test/push.ts saves
+test/push-credentials.json

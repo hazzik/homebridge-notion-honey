@@ -30,6 +30,11 @@ export interface AuthTokens {
   refresh_token?: string | null;
 }
 
+// The body of `POST /devices`.
+export interface DeviceRegistration {
+  device: { token: string; app_version: string; os_version: string; device_id: string; platform: "android" };
+}
+
 export interface ErrorReply {
   errors?: { title?: string }[];
 }

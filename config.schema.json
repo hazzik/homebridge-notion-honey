@@ -33,6 +33,12 @@
         "minimum": 30,
         "maximum": 3600,
         "description": "How often the plugin asks the Notion/Honey service for new readings."
+      },
+      "push": {
+        "title": "Push updates",
+        "type": "boolean",
+        "default": false,
+        "description": "Check the Notion/Honey service as soon as it sends an alert to the Honey Smart Home app. The plugin registers itself with your account as an Android phone with the app. It still checks the service at the interval above."
       }
     }
   }

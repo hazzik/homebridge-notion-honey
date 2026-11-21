@@ -12,8 +12,9 @@ import type {
 import { toDevices } from "./devices/index.js";
 import { HapSensors } from "./hap/index.js";
 import { MatterSensors } from "./matter/index.js";
-import { AuthError, NotionClient, type Listener, type Sensor } from "./notion/index.js";
-import { PLATFORM_NAME, PLUGIN_NAME, POLL_SECONDS } from "./settings.js";
+import { join } from "node:path";
+import { AuthError, NotionClient, PushUpdates, type Listener, type Sensor } from "./notion/index.js";
+import { PLATFORM_NAME, PLUGIN_NAME, POLL_SECONDS, PUSH } from "./settings.js";
 
 const AUTH_FAIL_BACKOFF_MS = 10 * 60 * 1000;
 const PREFS_REFRESH_MS = 60 * 60 * 1000;
@@ -23,6 +24,7 @@ interface NotionConfig extends PlatformConfig {
   email?: string;
   password?: string;
   pollSeconds?: number | string;
+  push?: boolean;
   apiBase?: string;
 }
 
@@ -34,6 +36,7 @@ export class NotionPlatform implements DynamicPlatformPlugin {
   private timer?: NodeJS.Timeout;
   private seenOnce = false;
   private polling = false;
+  private pollAgain = false;
   private failures = 0;
   private authBlockedUntil = 0;
   // The temperature unit of the account. It is null until the plugin reads the account preferences.
@@ -63,11 +66,25 @@ export class NotionPlatform implements DynamicPlatformPlugin {
       log,
     });
 
+    const push =
+      (config.push ?? PUSH.default) === true
+        ? new PushUpdates({
+            log,
+            client,
+            file: join(api.user.storagePath(), `${PLUGIN_NAME}-push.json`),
+            onPush: () => this.pollNow(client),
+          })
+        : undefined;
+
     api.on("didFinishLaunching", () => {
       void this.poll(client);
       this.timer = setInterval(() => void this.poll(client), pollMs);
+      void push?.start();
     });
-    api.on("shutdown", () => clearInterval(this.timer));
+    api.on("shutdown", () => {
+      clearInterval(this.timer);
+      push?.stop();
+    });
   }
 
   configureAccessory(accessory: PlatformAccessory): void {
@@ -76,6 +93,15 @@ export class NotionPlatform implements DynamicPlatformPlugin {
 
   configureMatterAccessory(accessory: MatterAccessory): void {
     this.matter?.configure(accessory);
+  }
+
+  // A push alert means that a state has changed. A check that is running may have read the state before the change, so
+  // the plugin checks once more after it.
+  private pollNow(client: NotionClient): void {
+    // The regular check right after this one would read the same states, so the plugin moves it a full interval later.
+    this.timer?.refresh();
+    if (this.polling) this.pollAgain = true;
+    else void this.poll(client);
   }
 
   async poll(client: NotionClient): Promise<void> {
@@ -100,6 +126,10 @@ export class NotionPlatform implements DynamicPlatformPlugin {
       this.handlePollError(e);
     } finally {
       this.polling = false;
+      if (this.pollAgain) {
+        this.pollAgain = false;
+        void this.poll(client);
+      }
     }
   }
 

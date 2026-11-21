@@ -57,6 +57,7 @@
     "types": "tsc --noEmit"
   },
   "dependencies": {
+    "@eneris/push-receiver": "^4.4.0",
     "jwt-decode": "^4.0.0"
   }
 }

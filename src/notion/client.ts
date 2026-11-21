@@ -8,7 +8,7 @@ import type { Logging } from "homebridge";
 import { jwtDecode } from "jwt-decode";
 import { AuthError, httpError } from "./errors.js";
 import { parseJson, send } from "./http.js";
-import type { AuthTokens, Listener, Sensor, UserPreferences } from "./types.js";
+import type { AuthTokens, DeviceRegistration, Listener, Sensor, UserPreferences } from "./types.js";
 
 const DEFAULT_API_BASE = "https://api.getnotion.com/api";
 
@@ -50,7 +50,8 @@ export class NotionClient {
     this.loginBody = { email, password, session_name: "homebridge-" + randomBytes(6).toString("hex") };
   }
 
-  private async fetch<T>(path: string, { method = "GET", headers = {}, body }: FetchOptions = {}): Promise<T> {
+  // Returns the parsed JSON reply, or null for an empty reply or a reply that is not JSON.
+  private async call(path: string, { method = "GET", headers = {}, body }: FetchOptions = {}): Promise<unknown> {
     const hasBody = body !== undefined;
     const res = await send(this.apiBase + path, {
       method,
@@ -59,7 +60,14 @@ export class NotionClient {
     });
     const data = parseJson(await res.text());
     if (!res.ok) throw httpError(method, path, res.status, data);
-    if (data === null) throw new Error(`${method} ${path} returned an empty reply or a reply that is not JSON`);
+    return data;
+  }
+
+  private async fetch<T>(path: string, options: FetchOptions = {}): Promise<T> {
+    const data = await this.call(path, options);
+    if (data === null) {
+      throw new Error(`${options.method ?? "GET"} ${path} returned an empty reply or a reply that is not JSON`);
+    }
     return data as T;
   }
 
@@ -68,8 +76,8 @@ export class NotionClient {
     return this.fetch<T>(path, { method: "POST", headers: { "Accept-Version": "2" }, body: { auth } });
   }
 
-  private authorizedGet<T>(path: string): Promise<T> {
-    return this.fetch<T>(path, { headers: this.jwt ? { Authorization: `Bearer ${this.jwt}` } : {} });
+  private authorization(): Record<string, string> {
+    return this.jwt ? { Authorization: `Bearer ${this.jwt}` } : {};
   }
 
   private saveTokens(auth: AuthTokens | undefined): void {
@@ -123,17 +131,32 @@ export class NotionClient {
     }
   }
 
-  async request<T>(path: string): Promise<T> {
+  private async withAuth<T>(send: () => Promise<T>): Promise<T> {
     await this.ensureAuth();
     try {
-      return await this.authorizedGet<T>(path);
+      return await send();
     } catch (e) {
       if (!(e instanceof AuthError)) throw e;
       // The service rejected the token before its expiry time, for example because the service revoked it.
       // Get a new token and try once more.
       await this.reauthenticate();
-      return this.authorizedGet<T>(path);
+      return send();
     }
+  }
+
+  request<T>(path: string): Promise<T> {
+    return this.withAuth(() => this.fetch<T>(path, { headers: this.authorization() }));
+  }
+
+  // Registers a phone for the push alerts of the account, like the Android app does. The plugin ignores the reply.
+  async registerDevice(registration: DeviceRegistration): Promise<void> {
+    await this.withAuth(() =>
+      this.call("/devices", {
+        method: "POST",
+        headers: { "Accept-Version": "2", ...this.authorization() },
+        body: registration,
+      }),
+    );
   }
 
   private async getList<T>(path: string, key: string): Promise<T[]> {

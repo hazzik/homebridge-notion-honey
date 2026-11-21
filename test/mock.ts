@@ -13,6 +13,7 @@
 import { UnsecuredJWT } from "jose";
 import http from "node:http";
 import { text } from "node:stream/consumers";
+import type { DeviceRegistration } from "../src/notion/index.js";
 import config from "./config.json" with { type: "json" };
 
 const account = config.platforms.find((p) => p.platform === "NotionHoney")!;
@@ -108,6 +109,7 @@ interface Body {
   on?: boolean;
   uuid?: string;
   auth?: { email?: string; password?: string; session_name?: string; refresh_token?: string } | null;
+  device?: Partial<DeviceRegistration["device"]> | null;
 }
 
 type Reply = [status: number, body: unknown];
@@ -195,6 +197,13 @@ function signIn(url: string, req: http.IncomingMessage, json: Body): Reply | und
   return m ? refresh(m[1], json.auth?.refresh_token) : undefined;
 }
 
+function registerDevice(req: http.IncomingMessage, device: Body["device"]): Reply {
+  if (req.headers["accept-version"] !== "2") return error(400, "Unsupported API version");
+  if (!device?.token || !device.device_id || device.platform !== "android") return error(422, "Invalid device");
+  console.log(`A phone registered: ${device.device_id}`);
+  return [200, { device }];
+}
+
 function data(url: string): Reply {
   if (url === "/sensors") return [200, { sensors: emptySensors ? [] : sensors }];
   if (url === "/sensor/listeners") {
@@ -213,6 +222,7 @@ function route(url: string, req: http.IncomingMessage, json: Body): Reply {
   const signInReply = signIn(url, req, json);
   if (signInReply) return signInReply;
   if (!authed(req)) return error(401, "Unauthorized");
+  if (req.method === "POST" && url === "/devices") return registerDevice(req, json.device);
   return data(url);
 }
 

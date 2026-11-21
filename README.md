@@ -28,7 +28,13 @@ Over Matter, a sensor that you rename in the app keeps its old name until Homebr
 
 The plugin checks the Notion/Honey service every 60 seconds by default, so a door that opens can take up to a minute to show as open. If 5 checks in a row fail, the HomeKit tiles show "Not Responding" and the plugin marks every Matter device as not reachable. Both stay that way until a check succeeds again. If the service rejects the password, the plugin waits 10 minutes before it tries again, so that the service does not lock your account.
 
-You can set `email`, `password` and `pollSeconds`. `pollSeconds` is the time between checks in seconds, from 30 to 3600.
+You can set `email`, `password`, `pollSeconds` and `push`. `pollSeconds` is the time between checks in seconds, from 30 to 3600. `push` turns on push updates, which are off by default.
+
+## Push updates
+
+With push updates on, the plugin also checks the service as soon as the service sends an alert to the Honey Smart Home app. To get the alerts, the plugin registers itself with your account as an Android phone with the app. The plugin receives the same alerts as the app, so a change that the app does not alert you about shows up at the next check.
+
+The plugin saves the phone in `homebridge-notion-honey-push.json` in the Homebridge storage folder, so that it stays the same phone after a restart. Homebridge must be able to reach `mtalk.google.com` on TCP port 5228. If the plugin cannot connect there within 2 minutes, or if Google or the Notion/Honey service rejects the phone, the plugin logs a warning and starts push again 2 minutes later. It doubles the wait after each failure, up to 1 hour. The plugin keeps checking the service every `pollSeconds` all the time.
 
 This plugin is not affiliated with Notion, Comcast or Honey Insurance. It uses an unofficial API.
 

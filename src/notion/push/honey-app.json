@@ -1,0 +1,11 @@
+{
+  "firebase": {
+    "apiKey": "AIzaSyC6F29i4XGFQ_HLARhlXfvSEonKYf8lQB8",
+    "appId": "1:936951353570:android:6a30dd4e9b1e40e4",
+    "projectId": "notion-46d6f",
+    "messagingSenderId": "936951353570"
+  },
+  "packageName": "com.getnotion.android",
+  "appVersion": "25.2.1",
+  "targetAndroidApiLevel": "35"
+}

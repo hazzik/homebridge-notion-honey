@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Alex Zaytsev
 // An in-memory Notion service for unit tests. Pass `fetch` to `vi.stubGlobal("fetch", ...)`.
 import { UnsecuredJWT } from "jose";
-import type { Listener, Sensor } from "../src/notion/index.js";
+import type { DeviceRegistration, Listener, Sensor } from "../src/notion/index.js";
 
 export const API_BASE = "https://notion.test/api";
 
@@ -41,8 +41,8 @@ function error(status: number, title: string): Reply {
   return [status, { errors: [{ title }] }];
 }
 
-function parseBody(body: RequestInit["body"]): SignInBody {
-  return typeof body === "string" ? (JSON.parse(body) as SignInBody) : {};
+function parseBody<T>(body: RequestInit["body"]): Partial<T> {
+  return typeof body === "string" ? (JSON.parse(body) as Partial<T>) : {};
 }
 
 export class FakeNotion {
@@ -53,9 +53,12 @@ export class FakeNotion {
   celsius = true;
   down = false;
   preferencesDown = false;
+  devicesDown = false;
   sensors: Sensor[] = [];
   listeners: Listener[] = [];
   readonly requests: string[] = [];
+  // The phones that registered for the push alerts of the account.
+  readonly devices: DeviceRegistration["device"][] = [];
   private readonly tokens = new Map<string, number>();
   private readonly refreshTokens = new Set<string>();
   private issued = 0;
@@ -94,7 +97,7 @@ export class FakeNotion {
   }
 
   private route(method: string, path: string, headers: Headers, body: RequestInit["body"]): Reply {
-    if (method === "POST") return this.signIn(path, headers, parseBody(body).auth ?? {});
+    if (method === "POST") return this.post(path, headers, body);
     if (!this.authorized(headers)) return error(401, "Unauthorized");
     if (path === "/sensors") return [200, { sensors: this.sensors }];
     if (path === "/sensor/listeners") return [200, { listeners: this.listeners }];
@@ -105,8 +108,15 @@ export class FakeNotion {
     return error(404, "Not found");
   }
 
-  private signIn(path: string, headers: Headers, auth: NonNullable<SignInBody["auth"]>): Reply {
+  // Every POST endpoint takes API version 2.
+  private post(path: string, headers: Headers, body: RequestInit["body"]): Reply {
     if (headers.get("Accept-Version") !== "2") return error(400, "Unsupported API version");
+    if (path !== "/devices") return this.signIn(path, parseBody<SignInBody>(body).auth ?? {});
+    if (!this.authorized(headers)) return error(401, "Unauthorized");
+    return this.registerDevice(parseBody<DeviceRegistration>(body));
+  }
+
+  private signIn(path: string, auth: NonNullable<SignInBody["auth"]>): Reply {
     if (path === "/auth/login") {
       if (auth.email !== this.email || auth.password !== this.password) return error(401, "Invalid email or password");
       return [200, { user: { uuid: this.userUuid }, auth: this.issueTokens() }];
@@ -118,6 +128,13 @@ export class FakeNotion {
       return [200, { auth: this.issueTokens() }];
     }
     return error(404, "Not found");
+  }
+
+  private registerDevice({ device }: Partial<DeviceRegistration>): Reply {
+    if (this.devicesDown) return error(503, "Service unavailable");
+    if (!device) return error(422, "Invalid device");
+    this.devices.push(device);
+    return [200, { device }];
   }
 
   private issueTokens(): { jwt: string; refresh_token: string } {
