@@ -21,6 +21,13 @@ export interface Listener {
   insights?: { primary?: { value?: string | null } | null } | null;
 }
 
+// A room that the user picked for a sensor in the app. `Sensor.location_id` in the reply of `/sensors` is its `id`.
+export interface Location {
+  id: number;
+  display_name: string;
+  sensor_ids: string[];
+}
+
 export interface UserPreferences {
   celsius_enabled?: boolean;
 }

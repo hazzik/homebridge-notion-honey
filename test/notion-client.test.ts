@@ -34,6 +34,12 @@ describe("NotionClient", () => {
     expect(await client.getPreferences()).toEqual({ celsius_enabled: false });
   });
 
+  it("reads the locations of a system", async () => {
+    notion.locations = [{ id: 832274, display_name: "Living Room", sensor_ids: ["sensor-a"] }];
+
+    expect(await createClient().getLocations(notion.systemId)).toEqual(notion.locations);
+  });
+
   it("signs in once for requests that start together", async () => {
     const client = createClient();
 

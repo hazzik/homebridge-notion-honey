@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Alex Zaytsev
 // An in-memory Notion service for unit tests. Pass `fetch` to `vi.stubGlobal("fetch", ...)`.
 import { UnsecuredJWT } from "jose";
-import type { DeviceRegistration, Listener, Sensor } from "../src/notion/index.js";
+import type { DeviceRegistration, Listener, Location, Sensor } from "../src/notion/index.js";
 
 export const API_BASE = "https://notion.test/api";
 
@@ -49,6 +49,7 @@ export class FakeNotion {
   email = "user@example.com";
   password = "right-password";
   readonly userUuid = "user-1";
+  readonly systemId = "system-1";
   tokenTtlSeconds = 3600;
   celsius = true;
   down = false;
@@ -56,6 +57,7 @@ export class FakeNotion {
   devicesDown = false;
   sensors: Sensor[] = [];
   listeners: Listener[] = [];
+  locations: Location[] = [];
   readonly requests: string[] = [];
   // The phones that registered for the push alerts of the account.
   readonly devices: DeviceRegistration["device"][] = [];
@@ -101,6 +103,7 @@ export class FakeNotion {
     if (!this.authorized(headers)) return error(401, "Unauthorized");
     if (path === "/sensors") return [200, { sensors: this.sensors }];
     if (path === "/sensor/listeners") return [200, { listeners: this.listeners }];
+    if (path === `/systems/${this.systemId}/locations`) return [200, { locations: this.locations }];
     if (path === `/users/${this.userUuid}/user_preferences`) {
       if (this.preferencesDown) return error(503, "Service unavailable");
       return [200, { user_preferences: { celsius_enabled: this.celsius } }];

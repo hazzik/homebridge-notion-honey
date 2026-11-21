@@ -8,7 +8,7 @@ import type { Logging } from "homebridge";
 import { jwtDecode } from "jwt-decode";
 import { AuthError, httpError } from "./errors.js";
 import { parseJson, send } from "./http.js";
-import type { AuthTokens, DeviceRegistration, Listener, Sensor, UserPreferences } from "./types.js";
+import type { AuthTokens, DeviceRegistration, Listener, Location, Sensor, UserPreferences } from "./types.js";
 
 const DEFAULT_API_BASE = "https://api.getnotion.com/api";
 
@@ -171,6 +171,12 @@ export class NotionClient {
 
   getListeners(): Promise<Listener[]> {
     return this.getList("/sensor/listeners", "listeners");
+  }
+
+  // The service takes the numeric `system_id` of a sensor or the `uuid` of the system. The query is the one that the
+  // Android app sends.
+  getLocations(systemId: number | string): Promise<Location[]> {
+    return this.getList(`/systems/${systemId}/locations?sensors=true&per_page=500`, "locations");
   }
 
   async getPreferences(): Promise<UserPreferences> {
