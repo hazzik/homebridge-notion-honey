@@ -175,7 +175,6 @@ export class MatterSensors {
     await this.matter.updateAccessoryState(uuid, cluster, attributes, partId);
   }
 
-  // Remove accessories for sensors that are gone from the account.
   private async removeStale(active: Set<string>): Promise<void> {
     const stale = this.all().filter((a) => !active.has(a.UUID));
     if (!stale.length) return;

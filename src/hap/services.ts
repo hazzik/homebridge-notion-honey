@@ -4,7 +4,6 @@
 import type { HAP, Service } from "homebridge";
 import type { Reading } from "../devices/index.js";
 
-// The HomeKit service that each reading type appears as.
 export const HAP_SERVICES = {
   contact: "ContactSensor",
   leak: "LeakSensor",

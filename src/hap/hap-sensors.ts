@@ -135,7 +135,6 @@ export class HapSensors {
     return dirty;
   }
 
-  // Remove accessories for sensors that are gone from the account.
   private removeStale(activeUuids: Set<string>): void {
     const stale = [...this.accessories.entries()].filter(([u]) => !activeUuids.has(u));
     if (!stale.length) return;

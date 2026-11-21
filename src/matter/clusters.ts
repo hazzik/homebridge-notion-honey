@@ -6,7 +6,6 @@ import type { Device, Reading } from "../devices/index.js";
 
 type Clusters = NonNullable<MatterAccessory["clusters"]>;
 
-// The Matter device type that each reading type appears as.
 export const DEVICE_TYPES = {
   contact: "ContactSensor",
   leak: "LeakSensor",
