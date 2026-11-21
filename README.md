@@ -28,7 +28,7 @@ Over Matter, a sensor that you rename in the app keeps its old name until Homebr
 
 The plugin checks the Notion/Honey service every 60 seconds by default, so a door that opens can take up to a minute to show as open. If 5 checks in a row fail, the HomeKit tiles show "Not Responding" and the plugin marks every Matter device as not reachable. Both stay that way until a check succeeds again. If the service rejects the password, the plugin waits 10 minutes before it tries again, so that the service does not lock your account.
 
-You can set `email`, `password` and `pollSeconds`. `pollSeconds` is the time between checks in seconds, and its minimum is 30.
+You can set `email`, `password` and `pollSeconds`. `pollSeconds` is the time between checks in seconds, from 30 to 3600.
 
 This plugin is not affiliated with Notion, Comcast or Honey Insurance. It uses an unofficial API.
 

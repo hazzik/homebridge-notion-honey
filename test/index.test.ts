@@ -256,6 +256,18 @@ describe("Notion platform", () => {
     expect(Object.keys(homebridge.services()).sort()).toEqual(["Front door", "Hallway", "Laundry"]);
   });
 
+  it("checks the service once per the largest allowed pollSeconds when the setting is larger", async () => {
+    const largest = configSchema.schema.properties.pollSeconds.maximum;
+    const largestMs = largest * 1000;
+
+    await homebridge.start({ ...config(), pollSeconds: largest * 1000 });
+    await vi.advanceTimersByTimeAsync(largestMs - 1);
+    expect(notion.count("GET /sensors")).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(notion.count("GET /sensors")).toBe(2);
+  });
+
   it("reuses cached accessories after a restart", async () => {
     await homebridge.start(config());
     homebridge.stop();

@@ -52,7 +52,8 @@ export class NotionPlatform implements DynamicPlatformPlugin {
       return;
     }
 
-    const pollMs = Math.max(POLL_SECONDS.minimum, Number(config.pollSeconds) || POLL_SECONDS.default) * 1000;
+    const pollSeconds = Number(config.pollSeconds) || POLL_SECONDS.default;
+    const pollMs = Math.min(POLL_SECONDS.maximum, Math.max(POLL_SECONDS.minimum, pollSeconds)) * 1000;
     const client = new NotionClient({
       email: config.email,
       password: config.password,
