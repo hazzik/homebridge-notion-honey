@@ -127,9 +127,10 @@ export class NotionPlatform implements DynamicPlatformPlugin {
 
   async sync(sensors: Sensor[], listeners: Listener[]): Promise<void> {
     const devices = toDevices(sensors, listeners, this.celsius);
-    // Keep all accessories when the service returns no sensors. If that empty reply is wrong, removing the
-    // accessories would also remove them from their rooms and automations in Apple Home.
-    const removeStale = sensors.length > 0;
+    // Keep all accessories when no sensor in the reply has a supported task, for example when the service returns no
+    // sensors or no listeners. If that reply is wrong, removing the accessories would also remove them from their
+    // rooms and automations in Apple Home.
+    const removeStale = devices.length > 0;
     const added = new Set<string>();
     if (this.isHapEnabled()) {
       for (const uuid of this.hap.sync(devices, removeStale)) added.add(uuid);

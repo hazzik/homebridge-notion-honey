@@ -238,6 +238,16 @@ describe("Notion platform", () => {
     expect(Object.keys(homebridge.services()).sort()).toEqual(["Front door", "Laundry"]);
   });
 
+  it("keeps all accessories when the service returns no listeners", async () => {
+    await homebridge.start(config());
+    const services = homebridge.services();
+
+    notion.listeners = [];
+    await nextPoll();
+
+    expect(homebridge.services()).toEqual(services);
+  });
+
   it("publishes over HAP on Homebridge versions that have no isHapEnabled()", async () => {
     homebridge = new FakeHomebridge({ hasIsHapEnabled: false });
 

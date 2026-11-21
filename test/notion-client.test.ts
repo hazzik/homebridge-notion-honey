@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Alex Zaytsev
 import type { Logging } from "homebridge";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthError, NotionClient } from "../src/notion/index.js";
+import { AuthError, NotionClient, type Listener } from "../src/notion/index.js";
 import { API_BASE, FakeNotion, KIND, listener, sensor } from "./fake-notion.js";
 
 let notion: FakeNotion;
@@ -72,6 +72,12 @@ describe("NotionClient", () => {
 
     expect(await client.getSensors()).toEqual(notion.sensors);
     expect(notion.count("POST /auth/login")).toBe(2);
+  });
+
+  it("throws when a reply has no list", async () => {
+    notion.listeners = null as unknown as Listener[];
+
+    await expect(createClient().getListeners()).rejects.toThrow('a reply without a "listeners" list');
   });
 
   it("throws AuthError when the service rejects the password", async () => {

@@ -138,7 +138,8 @@ export class NotionClient {
 
   private async getList<T>(path: string, key: string): Promise<T[]> {
     const list = (await this.request<Record<string, unknown>>(path))[key];
-    return Array.isArray(list) ? (list as T[]) : [];
+    if (!Array.isArray(list)) throw new Error(`GET ${path} returned a reply without a "${key}" list`);
+    return list as T[];
   }
 
   getSensors(): Promise<Sensor[]> {
