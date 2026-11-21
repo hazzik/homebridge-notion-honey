@@ -1,0 +1,52 @@
+{
+  "name": "homebridge-notion-honey",
+  "displayName": "Notion / Honey Smart Home Sensors",
+  "version": "0.0.1",
+  "description": "A Homebridge plugin that shows Notion and Honey Smart Home sensors in Apple Home: doors, windows, leaks, temperature and smoke alarms.",
+  "main": "dist/index.js",
+  "license": "LGPL-3.0-or-later",
+  "keywords": [
+    "homebridge-plugin",
+    "notion",
+    "honey",
+    "leak",
+    "contact",
+    "temperature"
+  ],
+  "engines": {
+    "node": "^22.0.0 || ^24.0.0 || ^26.0.0",
+    "homebridge": "^2.0.0"
+  },
+  "files": [
+    "dist/",
+    "config.schema.json",
+    "README.md"
+  ],
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@homebridge/hap-nodejs": "^2.3.0",
+    "@types/node": "^22",
+    "eslint": "^10.15.0",
+    "homebridge": "^2",
+    "jose": "^6.2.18",
+    "prettier": "^3.10.1",
+    "typescript": "^6",
+    "typescript-eslint": "^8.73.0",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "yarn types && vite build",
+    "prepack": "yarn build",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "jwt-decode": "^4.0.0"
+  }
+}

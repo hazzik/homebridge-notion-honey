@@ -1,0 +1,38 @@
+{
+  "pluginAlias": "NotionHoney",
+  "pluginType": "platform",
+  "singular": true,
+  "headerDisplay": "Enter the email and password that you use in the Notion app or the Honey Smart Home app.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "default": "Notion",
+        "required": true
+      },
+      "email": {
+        "title": "Email",
+        "type": "string",
+        "format": "email",
+        "required": true
+      },
+      "password": {
+        "title": "Password",
+        "type": "string",
+        "required": true,
+        "x-schema-form": {
+          "type": "password"
+        }
+      },
+      "pollSeconds": {
+        "title": "Seconds between checks",
+        "type": "integer",
+        "default": 60,
+        "minimum": 30,
+        "description": "How often the plugin asks the Notion/Honey service for new readings."
+      }
+    }
+  }
+}

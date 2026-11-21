@@ -1,0 +1,19 @@
+{
+  "bridge": {
+    "name": "TestBridge",
+    "username": "0E:11:22:33:44:55",
+    "port": 51826,
+    "pin": "031-45-154",
+    "advertiser": "ciao"
+  },
+  "platforms": [
+    {
+      "platform": "NotionHoney",
+      "name": "Notion",
+      "email": "alex@example.com",
+      "password": "right-password",
+      "pollSeconds": 30,
+      "apiBase": "http://127.0.0.1:18080/api"
+    }
+  ]
+}
