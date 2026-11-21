@@ -1,4 +1,6 @@
-# homebridge-notion-honey
+# Notion / Honey Smart Home plugin for Homebridge
+
+[![verified-by-homebridge](https://img.shields.io/badge/homebridge-verified-blueviolet?color=%23491F59&style=flat)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
 
 This Homebridge plugin shows Notion sensors in Apple Home. In Australia, Honey Insurance runs the Notion service as the **Honey Smart Home** app. The plugin signs in with the account that you use in that app.
 
