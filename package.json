@@ -1,6 +1,6 @@
 {
   "name": "homebridge-notion-honey",
-  "displayName": "Notion / Honey Smart Home Sensors",
+  "displayName": "Notion Hub",
   "version": "0.0.1",
   "description": "A Homebridge plugin that shows Notion and Honey Smart Home sensors in Apple Home: doors, windows, leaks, temperature and smoke alarms.",
   "main": "dist/index.js",
