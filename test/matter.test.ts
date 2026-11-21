@@ -37,8 +37,9 @@ function stateKey(partId: string | undefined, cluster: string): string {
   return `${partId ?? ""}/${cluster}`;
 }
 
+// Like `partShape` in Homebridge, this function sorts the part ids.
 function shape(accessory: MatterAccessory): string {
-  return JSON.stringify([accessory.deviceType.name, accessory.parts?.map((p) => p.id) ?? []]);
+  return JSON.stringify([accessory.deviceType.name, accessory.parts?.map((p) => p.id).sort() ?? []]);
 }
 
 function initialState(accessory: MatterAccessory): Map<string, State> {
@@ -58,42 +59,45 @@ function copy({ accessory, state }: Published): Published {
   return { accessory: { ...accessory }, state: new Map([...state].map(([key, value]) => [key, { ...value }])) };
 }
 
-// Like Homebridge, this fake returns a promise that rejects when the action fails.
-function run(action: () => void): Promise<void> {
-  return new Promise((resolve) => {
-    action();
-    resolve();
-  });
-}
-
 // A fake of `api.matter` in Homebridge 2.5.0.
 class FakeMatter {
   readonly stateUpdates: string[] = [];
-  readonly rejects = new Set<string>(); // display names of the accessories that fail to register
-  private readonly published = new Map<string, Published>();
-  private readonly restored: Map<string, Published>;
+  readonly registrations: string[] = [];
+  // Homebridge catches an error in a registration or a state update, logs it, and resolves the promise of the call.
+  readonly errors: string[] = [];
+  readonly failingRegistrations = new Set<string>(); // display names of the accessories that fail to register
+  readonly failingUpdates = new Set<string>(); // display names of the accessories whose state updates fail
+  // UUID -> accessory that has an endpoint on the bridge. Homebridge publishes the accessories from its cache before
+  // the plugin registers them.
+  private readonly published: Map<string, Published>;
+  // UUIDs of the accessories from the cache that the plugin has not registered yet.
+  private readonly restored: Set<string>;
   // The copies that Homebridge would write to the file in which it caches Matter accessories.
-  private readonly cached = new Map<string, Published>();
+  private readonly cached: Map<string, Published>;
 
   readonly api = {
     uuid: hap.uuid,
     deviceTypes: DEVICE_TYPES,
     registerPlatformAccessories: (_plugin: string, _platform: string, accessories: MatterAccessory[]) =>
-      run(() => accessories.forEach((a) => this.register(a))),
+      this.run(() => accessories.forEach((a) => this.register(a))),
     updatePlatformAccessories: (accessories: MatterAccessory[]) =>
-      run(() => accessories.forEach((a) => this.update(a))),
+      this.run(() => accessories.forEach((a) => this.update(a))),
     unregisterPlatformAccessories: (_plugin: string, _platform: string, accessories: MatterAccessory[]) =>
-      run(() => accessories.forEach((a) => this.unregister(a.UUID))),
+      this.run(() => accessories.forEach((a) => this.unregister(a.UUID))),
     updateAccessoryState: (uuid: string, cluster: string, attributes: State, partId?: string) =>
-      run(() => this.setState(uuid, cluster, attributes, partId)),
+      this.run(() => this.setState(uuid, cluster, attributes, partId)),
+    getAccessoryState: (uuid: string, cluster: string, partId?: string) =>
+      Promise.resolve(this.getState(uuid, cluster, partId)),
   };
 
   constructor(cache: Published[] = []) {
-    this.restored = new Map(cache.map((p) => [p.accessory.UUID, copy(p)]));
+    this.published = new Map(cache.map((p) => [p.accessory.UUID, copy(p)]));
+    this.restored = new Set(this.published.keys());
+    this.cached = new Map(cache.map((p) => [p.accessory.UUID, copy(p)]));
   }
 
   restoredAccessories(): MatterAccessory[] {
-    return [...this.restored.values()].map((p) => ({ ...p.accessory }));
+    return [...this.restored].map((uuid) => ({ ...this.published.get(uuid)!.accessory }));
   }
 
   cache(): Published[] {
@@ -124,19 +128,32 @@ class FakeMatter {
     return [...new Set(values)];
   }
 
+  private run(action: () => void): Promise<void> {
+    try {
+      action();
+    } catch (e) {
+      this.errors.push((e as Error).message);
+    }
+    return Promise.resolve();
+  }
+
   private register(accessory: MatterAccessory): void {
-    if (this.rejects.has(accessory.displayName)) throw new Error(`Failed to register ${accessory.displayName}`);
-    if (this.published.has(accessory.UUID))
+    if (this.failingRegistrations.has(accessory.displayName)) {
+      throw new Error(`Failed to register ${accessory.displayName}`);
+    }
+    const existing = this.published.get(accessory.UUID);
+    if (existing && !this.restored.has(accessory.UUID)) {
       throw new Error(`Matter accessory "${accessory.UUID}" is already registered`);
+    }
     // `AccessoryManager.buildCustomBehaviors` adds these attributes to a battery `powerSource`.
     const powerSource = accessory.clusters?.powerSource;
     if (powerSource) Object.assign(powerSource, { batChargeState: 0, batFunctionalWhileCharging: false });
-    // A restored accessory keeps its cached state when its device type and parts did not change.
-    const restored = this.restored.get(accessory.UUID);
-    const state = restored && shape(restored.accessory) === shape(accessory) ? restored.state : initialState(accessory);
+    // A restored accessory keeps its state when its device type and parts did not change.
+    const state = existing && shape(existing.accessory) === shape(accessory) ? existing.state : initialState(accessory);
     this.restored.delete(accessory.UUID);
     this.published.set(accessory.UUID, { accessory, state });
     this.cached.set(accessory.UUID, copy({ accessory, state }));
+    this.registrations.push(accessory.displayName);
   }
 
   // Homebridge changes only the cached copy, which it publishes on its next start.
@@ -154,12 +171,21 @@ class FakeMatter {
   private setState(uuid: string, cluster: string, attributes: State, partId?: string): void {
     const published = this.published.get(uuid);
     if (!published) throw new Error(`Accessory ${uuid} not found or not registered`);
+    if (this.failingUpdates.has(published.accessory.displayName)) {
+      throw new Error(`Failed to update ${published.accessory.displayName}`);
+    }
     if (partId && !published.accessory.parts?.some((p) => p.id === partId)) {
       throw new Error(`Part ${partId} not found in accessory ${uuid}`);
     }
     const key = stateKey(partId, cluster);
     published.state.set(key, { ...published.state.get(key), ...attributes });
     this.stateUpdates.push(`${published.accessory.displayName} ${cluster}`);
+  }
+
+  // Like Homebridge, returns undefined when the accessory has no endpoint or the endpoint has no such cluster.
+  private getState(uuid: string, cluster: string, partId?: string): State | undefined {
+    const state = this.published.get(uuid)?.state.get(stateKey(partId, cluster));
+    return state && { ...state };
   }
 }
 
@@ -416,17 +442,48 @@ describe("Matter", () => {
     expect(homebridge.matter.reachable()).toEqual([true]);
   });
 
-  it("keeps publishing the other sensors when Homebridge rejects one", async () => {
-    homebridge.matter.rejects.add("Laundry");
+  it("shows the devices that Homebridge restores as not reachable when the service is down after a restart", async () => {
+    await homebridge.start(config());
+    notion.down = true;
+
+    const restarted = await restart();
+    for (let i = 0; i < POLLS_IN_A_LONG_OUTAGE; i++) await nextPoll();
+
+    expect(restarted.matter.reachable()).toEqual([false]);
+  });
+
+  it("keeps the device when the service returns the listeners in another order", async () => {
+    await homebridge.start(config());
+    const registrations = homebridge.matter.registrations.length;
+
+    notion.listeners = notion.listeners.toReversed();
+    await nextPoll();
+
+    expect(homebridge.matter.registrations).toHaveLength(registrations);
+  });
+
+  it("registers a device again when Homebridge failed to register it", async () => {
+    homebridge.matter.failingRegistrations.add("Laundry");
 
     await homebridge.start(config());
     expect(Object.keys(homebridge.matter.devices()).sort()).toEqual(["Front door", "Hallway"]);
-    expect(homebridge.log.error).toHaveBeenCalledWith(expect.stringContaining("Laundry"));
-    expect(homebridge.log.warn).not.toHaveBeenCalled();
 
-    homebridge.matter.rejects.clear();
+    homebridge.matter.failingRegistrations.clear();
     await nextPoll();
     expect(Object.keys(homebridge.matter.devices()).sort()).toEqual(["Front door", "Hallway", "Laundry"]);
+  });
+
+  it("sends a value again when Homebridge failed to apply it", async () => {
+    await homebridge.start(config());
+    homebridge.matter.failingUpdates.add("Front door");
+
+    notion.setValue("a-door", "open");
+    await nextPoll();
+    expect(homebridge.matter.read("Front door", "booleanState")).toEqual({ stateValue: true });
+
+    homebridge.matter.failingUpdates.clear();
+    await nextPoll();
+    expect(homebridge.matter.read("Front door", "booleanState")).toEqual({ stateValue: false });
   });
 
   it("publishes over HAP and Matter when Homebridge has both turned on", async () => {
