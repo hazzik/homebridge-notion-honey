@@ -5,8 +5,18 @@
   "description": "A Homebridge plugin that shows Notion and Honey Smart Home sensors in Apple Home: doors, windows, leaks, temperature and smoke alarms.",
   "main": "dist/index.js",
   "license": "LGPL-3.0-or-later",
+  "homepage": "https://github.com/hazzik/homebridge-notion-honey#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hazzik/homebridge-notion-honey.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hazzik/homebridge-notion-honey/issues"
+  },
   "keywords": [
     "homebridge-plugin",
+    "supports-hap",
+    "supports-matter",
     "notion",
     "honey",
     "leak",
