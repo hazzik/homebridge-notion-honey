@@ -28,20 +28,25 @@ class FakeHomebridge {
   readonly accessories = new Map<string, hap.Accessory>();
   readonly registered: hap.Accessory[] = [];
   readonly log = { info: vi.fn(), success: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
-  private readonly api = Object.assign(new EventEmitter(), {
-    hap,
-    platformAccessory: Accessory,
-    isHapEnabled: () => true,
-    registerPlatform: vi.fn<(name: string, platform: PlatformPluginConstructor) => void>(),
-    registerPlatformAccessories: (_plugin: string, _platform: string, added: hap.Accessory[]) => {
-      for (const acc of added) this.accessories.set(acc.UUID, acc);
-      this.registered.push(...added);
-    },
-    updatePlatformAccessories: () => {},
-    unregisterPlatformAccessories: (_plugin: string, _platform: string, removed: hap.Accessory[]) => {
-      for (const acc of removed) this.accessories.delete(acc.UUID);
-    },
-  });
+  private readonly api;
+
+  // Homebridge 2.0 to 2.4 has no `isHapEnabled()`.
+  constructor({ hasIsHapEnabled = true }: { hasIsHapEnabled?: boolean } = {}) {
+    this.api = Object.assign(new EventEmitter(), {
+      hap,
+      platformAccessory: Accessory,
+      ...(hasIsHapEnabled ? { isHapEnabled: () => true } : {}),
+      registerPlatform: vi.fn<(name: string, platform: PlatformPluginConstructor) => void>(),
+      registerPlatformAccessories: (_plugin: string, _platform: string, added: hap.Accessory[]) => {
+        for (const acc of added) this.accessories.set(acc.UUID, acc);
+        this.registered.push(...added);
+      },
+      updatePlatformAccessories: () => {},
+      unregisterPlatformAccessories: (_plugin: string, _platform: string, removed: hap.Accessory[]) => {
+        for (const acc of removed) this.accessories.delete(acc.UUID);
+      },
+    });
+  }
 
   async start(config: Record<string, unknown>, cached: hap.Accessory[] = []): Promise<void> {
     const api = this.api as unknown as API;
@@ -231,6 +236,14 @@ describe("Notion platform", () => {
     await nextPoll();
 
     expect(Object.keys(homebridge.services()).sort()).toEqual(["Front door", "Laundry"]);
+  });
+
+  it("publishes over HAP on Homebridge versions that have no isHapEnabled()", async () => {
+    homebridge = new FakeHomebridge({ hasIsHapEnabled: false });
+
+    await homebridge.start(config());
+
+    expect(Object.keys(homebridge.services()).sort()).toEqual(["Front door", "Hallway", "Laundry"]);
   });
 
   it("reuses cached accessories after a restart", async () => {

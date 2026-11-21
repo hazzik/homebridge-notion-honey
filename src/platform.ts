@@ -131,7 +131,7 @@ export class NotionPlatform implements DynamicPlatformPlugin {
     // accessories would also remove them from their rooms and automations in Apple Home.
     const removeStale = sensors.length > 0;
     const added = new Set<string>();
-    if (this.api.isHapEnabled()) {
+    if (this.isHapEnabled()) {
       for (const uuid of this.hap.sync(devices, removeStale)) added.add(uuid);
     }
     if (this.matter) {
@@ -142,6 +142,11 @@ export class NotionPlatform implements DynamicPlatformPlugin {
       this.seenOnce = true;
       this.logFirstSync(sensors.length, devices.length, added.size);
     }
+  }
+
+  // Homebridge 2.0 to 2.4 has no `isHapEnabled()`.
+  private isHapEnabled(): boolean {
+    return this.api.isHapEnabled?.() ?? true;
   }
 
   private logFirstSync(sensorCount: number, activeCount: number, addedCount: number): void {
