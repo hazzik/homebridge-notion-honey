@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import configSchema from "../config.schema.json" with { type: "json" };
+import { HapSensors } from "../src/hap/index.js";
 import plugin from "../src/index.js";
 import { CONNECT_WAIT_MS, RETRY_FIRST_MS, RETRY_MAX_MS } from "../src/notion/push/push-updates.js";
 import { API_BASE, FakeNotion, KIND, listener, sensor } from "./fake-notion.js";
@@ -156,6 +157,7 @@ beforeEach(() => {
 
 afterEach(() => {
   homebridge.stop();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
   rmSync(storagePath, { recursive: true, force: true });
@@ -369,6 +371,19 @@ describe("Notion platform", () => {
     notion.down = false;
     await nextPoll();
     expect(homebridge.faults()).toEqual([StatusFault.NO_FAULT]);
+  });
+
+  it("does not count an error in its own code as a failed check of the service", async () => {
+    await homebridge.start(config());
+    vi.spyOn(HapSensors.prototype, "sync").mockImplementation(() => {
+      throw new Error("bug");
+    });
+
+    for (let i = 0; i < POLLS_IN_A_LONG_OUTAGE; i++) await nextPoll();
+
+    expect(homebridge.faults()).toEqual([StatusFault.NO_FAULT]);
+    expect(homebridge.log.error).toHaveBeenCalledWith("The plugin could not update the sensors in Apple Home: bug");
+    expect(homebridge.log.warn).not.toHaveBeenCalledWith(expect.stringContaining("could not reach"));
   });
 
   it("does not contact the service without an email and password", async () => {

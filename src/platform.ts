@@ -108,6 +108,20 @@ export class NotionPlatform implements DynamicPlatformPlugin {
     if (this.polling || Date.now() < this.authBlockedUntil) return;
     this.polling = true;
     try {
+      const reply = await this.readService(client);
+      if (reply) await this.updateSensors(reply.sensors, reply.listeners);
+    } finally {
+      this.polling = false;
+      if (this.pollAgain) {
+        this.pollAgain = false;
+        void this.poll(client);
+      }
+    }
+  }
+
+  // Returns undefined when a request to the service fails.
+  private async readService(client: NotionClient): Promise<{ sensors: Sensor[]; listeners: Listener[] } | undefined> {
+    try {
       const prefsDue = Date.now() - this.prefsFetchedAt > PREFS_REFRESH_MS;
       const [sensors, listeners, prefs] = await Promise.all([
         client.getSensors(),
@@ -118,18 +132,22 @@ export class NotionPlatform implements DynamicPlatformPlugin {
         if (typeof prefs.celsius_enabled === "boolean") this.celsius = prefs.celsius_enabled;
         this.prefsFetchedAt = Date.now();
       }
-
-      await this.sync(sensors, listeners);
       if (this.failures >= FAILURES_BEFORE_FAULT) this.log.info("The Notion/Honey service is reachable again.");
       this.failures = 0;
+      return { sensors, listeners };
     } catch (e) {
       this.handlePollError(e);
-    } finally {
-      this.polling = false;
-      if (this.pollAgain) {
-        this.pollAgain = false;
-        void this.poll(client);
-      }
+      return undefined;
+    }
+  }
+
+  // An error here comes from the plugin or from Homebridge, not from the service, so it does not count as a failed
+  // check of the service.
+  private async updateSensors(sensors: Sensor[], listeners: Listener[]): Promise<void> {
+    try {
+      await this.sync(sensors, listeners);
+    } catch (e) {
+      this.log.error(`The plugin could not update the sensors in Apple Home: ${(e as Error).message}`);
     }
   }
 
