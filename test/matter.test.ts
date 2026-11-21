@@ -61,7 +61,7 @@ function copy({ accessory, state }: Published): Published {
 
 // A fake of `api.matter` in Homebridge 2.5.0.
 class FakeMatter {
-  readonly stateUpdates: string[] = [];
+  readonly stateReads: string[] = [];
   readonly registrations: string[] = [];
   // Homebridge catches an error in a registration or a state update, logs it, and resolves the promise of the call.
   readonly errors: string[] = [];
@@ -78,6 +78,7 @@ class FakeMatter {
   readonly api = {
     uuid: hap.uuid,
     deviceTypes: DEVICE_TYPES,
+    clusterNames: { BridgedDeviceBasicInformation: "bridgedDeviceBasicInformation" },
     registerPlatformAccessories: (_plugin: string, _platform: string, accessories: MatterAccessory[]) =>
       this.run(() => accessories.forEach((a) => this.register(a))),
     updatePlatformAccessories: (accessories: MatterAccessory[]) =>
@@ -94,6 +95,10 @@ class FakeMatter {
     this.published = new Map(cache.map((p) => [p.accessory.UUID, copy(p)]));
     this.restored = new Set(this.published.keys());
     this.cached = new Map(cache.map((p) => [p.accessory.UUID, copy(p)]));
+  }
+
+  countReads(read: string): number {
+    return this.stateReads.filter((r) => r === read).length;
   }
 
   restoredAccessories(): MatterAccessory[] {
@@ -179,12 +184,13 @@ class FakeMatter {
     }
     const key = stateKey(partId, cluster);
     published.state.set(key, { ...published.state.get(key), ...attributes });
-    this.stateUpdates.push(`${published.accessory.displayName} ${cluster}`);
   }
 
   // Like Homebridge, returns undefined when the accessory has no endpoint or the endpoint has no such cluster.
   private getState(uuid: string, cluster: string, partId?: string): State | undefined {
-    const state = this.published.get(uuid)?.state.get(stateKey(partId, cluster));
+    const published = this.published.get(uuid);
+    this.stateReads.push(`${published?.accessory.displayName ?? uuid} ${cluster}`);
+    const state = published?.state.get(stateKey(partId, cluster));
     return state && { ...state };
   }
 }
@@ -434,17 +440,22 @@ describe("Matter", () => {
     expect(restarted.matter.read("Front door", "bridgedDeviceBasicInformation")).toEqual({ reachable: false });
   });
 
-  it("sends only the values that changed on later polls", async () => {
+  it("sends a changed value on the next poll", async () => {
     await homebridge.start(config());
-    homebridge.matter.stateUpdates.length = 0;
-
-    await nextPoll();
-    expect(homebridge.matter.stateUpdates).toEqual([]);
 
     notion.setValue("a-door", "open");
     await nextPoll();
-    expect(homebridge.matter.stateUpdates).toEqual(["Front door booleanState"]);
+
     expect(homebridge.matter.read("Front door", "booleanState")).toEqual({ stateValue: false });
+  });
+
+  it("reads the reachable state of a registered device once on each poll", async () => {
+    await homebridge.start(config());
+    homebridge.matter.stateReads.length = 0;
+
+    await nextPoll();
+
+    expect(homebridge.matter.countReads("Laundry bridgedDeviceBasicInformation")).toBe(1);
   });
 
   it("removes the device of a sensor that is gone from the account", async () => {

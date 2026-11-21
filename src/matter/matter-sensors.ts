@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Alex Zaytsev
 
 import type { Logging, MatterAccessory, MatterAPI } from "homebridge";
-import { isDeepStrictEqual } from "node:util";
 import { MANUFACTURER, type Device, type DeviceListener } from "../devices/index.js";
 import { batteryClusters, DEVICE_TYPES, hasMatterValue, readingClusters } from "./clusters.js";
 
@@ -12,7 +11,7 @@ function partId(listener: DeviceListener): string {
 }
 
 // The Matter API of Homebridge has no call that changes the device type or the parts of a registered accessory.
-// The part ids are sorted because the service can return the listeners of a sensor in any order.
+// The order of the listeners can change.
 function shape(accessory: MatterAccessory): string {
   return JSON.stringify([accessory.deviceType.name, accessory.parts?.map((p) => p.id).sort() ?? []]);
 }
@@ -33,6 +32,7 @@ export class MatterSensors {
   private readonly matter: MatterAPI;
   private readonly pluginName: string;
   private readonly platformName: string;
+  private readonly basicInfoCluster: string;
   // UUID -> accessory that Homebridge restored from its cache and that the plugin has not registered yet.
   private readonly cached = new Map<string, MatterAccessory>();
   // UUID -> accessory that the plugin registered after Homebridge started.
@@ -43,6 +43,7 @@ export class MatterSensors {
     this.matter = matter;
     this.pluginName = pluginName;
     this.platformName = platformName;
+    this.basicInfoCluster = matter.clusterNames.BridgedDeviceBasicInformation;
   }
 
   configure(accessory: MatterAccessory): void {
@@ -69,7 +70,7 @@ export class MatterSensors {
   async markAllUnreachable(): Promise<void> {
     for (const accessory of this.all()) {
       try {
-        await this.sendReachable(accessory.UUID, false);
+        await this.matter.updateAccessoryState(accessory.UUID, this.basicInfoCluster, { reachable: false });
       } catch (e) {
         this.log.error(
           `The plugin could not mark "${accessory.displayName}" as not reachable over Matter: ${(e as Error).message}`,
@@ -121,16 +122,16 @@ export class MatterSensors {
     const known = device.listeners.every((l) => hasMatterValue(l.reading));
     const entry = await this.currentEntry(accessory);
     if (!entry) {
-      // A new device would need each contact, leak or smoke state, so the plugin registers it only once each one is
-      // known. Homebridge already publishes a device from its cache, so the plugin marks that device as not reachable.
+      // Homebridge already publishes a cached device.
       if (!known) {
-        if (this.cached.has(accessory.UUID)) await this.sendReachable(accessory.UUID, false);
+        if (this.cached.has(accessory.UUID)) {
+          await this.matter.updateAccessoryState(accessory.UUID, this.basicInfoCluster, { reachable: false });
+        }
         return false;
       }
       await this.register(device, accessory, isNew);
     } else if (known && entry.info !== info(accessory)) {
-      // `updatePlatformAccessories` changes only the cached copy, which Homebridge uses on its next start. It also
-      // replaces the cached clusters, so the plugin waits until each contact, leak or smoke state is known.
+      // `updatePlatformAccessories` also replaces the cached clusters.
       await this.matter.updatePlatformAccessories([accessory]);
       entry.accessory = accessory;
       entry.info = info(accessory);
@@ -139,19 +140,23 @@ export class MatterSensors {
     return isNew;
   }
 
-  // Unregisters the accessory when its shape changed or when Homebridge has no endpoint for it, and then returns
-  // undefined.
+  // `registerPlatformAccessories` can resolve without an endpoint, so a later poll checks for one.
   private async currentEntry(accessory: MatterAccessory): Promise<Registered | undefined> {
     const entry = this.registered.get(accessory.UUID);
-    if (!entry || (entry.shape === shape(accessory) && (await this.hasEndpoint(accessory.UUID)))) return entry;
+    if (!entry) return undefined;
+    if (
+      entry.shape === shape(accessory) &&
+      (await this.matter.getAccessoryState(accessory.UUID, this.basicInfoCluster))
+    ) {
+      return entry;
+    }
     await this.matter.unregisterPlatformAccessories(this.pluginName, this.platformName, [entry.accessory]);
     this.registered.delete(accessory.UUID);
     return undefined;
   }
 
   private async register(device: Device, accessory: MatterAccessory, isNew: boolean): Promise<void> {
-    // `registerPlatformAccessories` adds attributes to the clusters that it receives, so it gets its own copy from
-    // `build()`.
+    // `registerPlatformAccessories` changes the clusters that it receives, so it gets a copy.
     await this.matter.registerPlatformAccessories(this.pluginName, this.platformName, [this.build(device)]);
     this.registered.set(accessory.UUID, { accessory, shape: shape(accessory), info: info(accessory) });
     this.cached.delete(accessory.UUID);
@@ -159,40 +164,15 @@ export class MatterSensors {
     if (isNew) this.log.info(`The plugin added "${device.name}" to Matter with these tasks: ${tasks}.`);
   }
 
-  // Homebridge resolves `registerPlatformAccessories` even when the registration fails, and Homebridge 2.0 to 2.4
-  // resolves it before the bridge adds the endpoint. A later poll finds out whether the endpoint exists.
-  private async hasEndpoint(uuid: string): Promise<boolean> {
-    return (await this.matter.getAccessoryState(uuid, "bridgedDeviceBasicInformation")) !== undefined;
-  }
-
-  private sendReachable(uuid: string, reachable: boolean): Promise<void> {
-    return this.send(uuid, "bridgedDeviceBasicInformation", { reachable });
-  }
-
+  // matter.js ignores a value that did not change, so the plugin sends every value on each poll.
   private async sendState(accessory: MatterAccessory, reachable: boolean): Promise<void> {
-    await this.sendReachable(accessory.UUID, reachable);
-    for (const [cluster, attributes] of Object.entries(accessory.clusters ?? {})) {
-      await this.send(accessory.UUID, cluster, attributes);
-    }
-    for (const part of accessory.parts ?? []) {
-      for (const [cluster, attributes] of Object.entries(part.clusters)) {
-        await this.send(accessory.UUID, cluster, attributes, part.id);
+    await this.matter.updateAccessoryState(accessory.UUID, this.basicInfoCluster, { reachable });
+    const endpoints = [{ id: undefined, clusters: accessory.clusters ?? {} }, ...(accessory.parts ?? [])];
+    for (const { id, clusters } of endpoints) {
+      for (const [cluster, attributes] of Object.entries(clusters)) {
+        await this.matter.updateAccessoryState(accessory.UUID, cluster, attributes, id);
       }
     }
-  }
-
-  // Sends only the attributes whose value differs from the state of the endpoint. Homebridge resolves
-  // `updateAccessoryState` even when the update fails, so the plugin compares with the endpoint and not with what it
-  // sent before.
-  private async send(
-    uuid: string,
-    cluster: string,
-    attributes: Record<string, unknown>,
-    partId?: string,
-  ): Promise<void> {
-    const state = await this.matter.getAccessoryState(uuid, cluster, partId);
-    if (state && Object.entries(attributes).every(([name, value]) => isDeepStrictEqual(state[name], value))) return;
-    await this.matter.updateAccessoryState(uuid, cluster, attributes, partId);
   }
 
   private async removeStale(active: Set<string>): Promise<void> {
