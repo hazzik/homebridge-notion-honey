@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Alex Zaytsev
 
 import type { MatterAccessory, MatterAPI } from "homebridge";
-import type { Device, Reading } from "../devices/index.js";
+import { hasValue, type Device, type KnownReading, type Reading } from "../devices/index.js";
 
 type Clusters = NonNullable<MatterAccessory["clusters"]>;
 
@@ -20,7 +20,14 @@ const BAT_CHARGE_LEVEL = { OK: 0, WARNING: 1 } as const;
 const ALARM_STATE = { NORMAL: 0, CRITICAL: 2 } as const;
 const EXPRESSED_STATE = { NORMAL: 0, SMOKE_ALARM: 1 } as const;
 
+// Matter takes a null temperature, but it has no unknown state for a contact, leak or smoke sensor.
+export function hasMatterValue(reading: Reading): reading is KnownReading | Extract<Reading, { type: "temperature" }> {
+  return reading.type === "temperature" || hasValue(reading);
+}
+
 export function readingClusters(reading: Reading): Clusters {
+  // The device keeps its last state, and `MatterSensors` marks it as not reachable.
+  if (!hasMatterValue(reading)) return {};
   switch (reading.type) {
     case "contact":
     case "leak":

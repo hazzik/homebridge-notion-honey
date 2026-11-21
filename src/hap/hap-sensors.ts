@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Alex Zaytsev
 
 import type { API, Logging, PlatformAccessory, Service } from "homebridge";
-import { MANUFACTURER, type Device, type DeviceListener } from "../devices/index.js";
-import { HAP_SERVICES, hasValue, updateReading } from "./services.js";
+import { hasValue, MANUFACTURER, type Device, type DeviceListener } from "../devices/index.js";
+import { HAP_SERVICES, updateReading } from "./services.js";
 
 export class HapSensors {
   private readonly log: Logging;

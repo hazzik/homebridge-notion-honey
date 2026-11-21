@@ -29,8 +29,18 @@ export function primaryValue(listener: Listener | undefined): string | null {
   return listener?.insights?.primary?.value ?? null;
 }
 
+// The Honey app also knows values in which the state is unknown, such as "initializing", "calibrating_init" and
+// "needs_resync" for a door, and "short" for a leak sensor that cannot detect leaks.
+function detected(listener: Listener, yes: string[], no: string[]): boolean | null {
+  const value = primaryValue(listener);
+  if (value === null) return null;
+  if (yes.includes(value)) return true;
+  if (no.includes(value)) return false;
+  return null;
+}
+
 function contactSensor(label: string): ListenerKind {
-  return { label, read: (l) => ({ type: "contact", detected: primaryValue(l) !== "open" }) };
+  return { label, read: (l) => ({ type: "contact", detected: detected(l, ["closed"], ["open"]) }) };
 }
 
 function temperature(listener: Listener, celsius: boolean | null): number | null {
@@ -50,8 +60,12 @@ export const LISTENER_KINDS: Partial<Record<number, ListenerKind>> = {
   [KIND.GARAGE_DOOR]: contactSensor("Garage door"),
   [KIND.WINDOW_HINGED_HORIZONTAL]: contactSensor("Window"),
   [KIND.SLIDING_DOOR_OR_WINDOW]: contactSensor("Sliding door"),
-  [KIND.LEAK]: { label: "Leak", read: (l) => ({ type: "leak", detected: primaryValue(l) === "leak" }) },
-  [KIND.ALARM]: { label: "Smoke alarm", read: (l) => ({ type: "smoke", detected: primaryValue(l) === "alarm" }) },
+  [KIND.LEAK]: { label: "Leak", read: (l) => ({ type: "leak", detected: detected(l, ["leak"], ["no_leak"]) }) },
+  // The Honey app shows "smoke" in a task's history as a warning, so the plugin counts it as an alarm too.
+  [KIND.ALARM]: {
+    label: "Smoke alarm",
+    read: (l) => ({ type: "smoke", detected: detected(l, ["alarm", "smoke"], ["no_alarm"]) }),
+  },
   [KIND.TEMPERATURE]: {
     label: "Temperature",
     read: (l, celsius) => ({ type: "temperature", celsius: temperature(l, celsius) }),

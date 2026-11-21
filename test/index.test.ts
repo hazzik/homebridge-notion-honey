@@ -204,6 +204,13 @@ describe("Notion platform", () => {
       expected: SmokeDetected.SMOKE_DETECTED,
     },
     {
+      shows: "smoke as a smoke alarm",
+      task: listener("a-alarm", "sensor-a", KIND.ALARM, "smoke"),
+      service: Service.SmokeSensor,
+      characteristic: SmokeDetected,
+      expected: SmokeDetected.SMOKE_DETECTED,
+    },
+    {
       shows: "the temperature",
       task: listener("a-temperature", "sensor-a", KIND.TEMPERATURE, "inside", "21.5°"),
       service: Service.TemperatureSensor,
@@ -252,18 +259,62 @@ describe("Notion platform", () => {
     expect(homebridge.read("Front door", Service.TemperatureSensor, Characteristic.CurrentTemperature)).toBe(21);
   });
 
-  it("shows an error on a temperature tile that loses its reading", async () => {
+  it("adds a contact tile only with its first open or closed state", async () => {
+    notion.setValue("a-door", "calibrating_init");
+
+    await homebridge.start(config());
+    expect(homebridge.services()["Front door"]).toEqual(["TemperatureSensor"]);
+
+    notion.setValue("a-door", "open");
+    await nextPoll();
+    expect(homebridge.read("Front door", Service.ContactSensor, ContactSensorState)).toBe(
+      ContactSensorState.CONTACT_NOT_DETECTED,
+    );
+  });
+
+  it.each([
+    {
+      shows: "a temperature tile that loses its reading",
+      task: "a-temperature",
+      value: "inside",
+      state: "--",
+      sensor: "Front door",
+      service: Service.TemperatureSensor,
+      characteristic: Characteristic.CurrentTemperature,
+    },
+    {
+      shows: "a contact tile whose state is neither open nor closed",
+      task: "a-door",
+      value: "needs_resync",
+      sensor: "Front door",
+      service: Service.ContactSensor,
+      characteristic: ContactSensorState,
+    },
+    {
+      shows: "a leak tile whose sensor cannot detect leaks",
+      task: "b-leak",
+      value: "short",
+      sensor: "Laundry",
+      service: Service.LeakSensor,
+      characteristic: LeakDetected,
+    },
+    {
+      shows: "a smoke alarm tile whose state is neither alarm nor no alarm",
+      task: "c-alarm",
+      value: "undefined",
+      sensor: "Hallway",
+      service: Service.SmokeSensor,
+      characteristic: SmokeDetected,
+    },
+  ])("shows an error on $shows", async ({ task, value, state, sensor, service, characteristic }) => {
     await homebridge.start(config());
 
-    notion.setValue("a-temperature", "inside", "--");
+    notion.setValue(task, value, state);
     await nextPoll();
 
-    const temperature = homebridge.characteristic(
-      "Front door",
-      Service.TemperatureSensor,
-      Characteristic.CurrentTemperature,
+    expect(homebridge.characteristic(sensor, service, characteristic)?.statusCode).toBe(
+      HAPStatus.SERVICE_COMMUNICATION_FAILURE,
     );
-    expect(temperature?.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
   it("shows a low battery and an offline sensor as warnings", async () => {

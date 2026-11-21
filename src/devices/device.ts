@@ -4,8 +4,17 @@
 export const MANUFACTURER = "Notion";
 
 // `detected` has the same meaning as in HomeKit and Matter. For a contact sensor, `detected: true` means "closed".
+// For a contact, leak or smoke sensor, null means that the service reports a value that is neither state, for example
+// while the sensor calibrates.
 export type Reading =
-  { type: "contact" | "leak" | "smoke"; detected: boolean } | { type: "temperature"; celsius: number | null };
+  { type: "contact" | "leak" | "smoke"; detected: boolean | null } | { type: "temperature"; celsius: number | null };
+
+export type KnownReading =
+  { type: "contact" | "leak" | "smoke"; detected: boolean } | { type: "temperature"; celsius: number };
+
+export function hasValue(reading: Reading): reading is KnownReading {
+  return reading.type === "temperature" ? reading.celsius !== null : reading.detected !== null;
+}
 
 export interface DeviceListener {
   id: string;

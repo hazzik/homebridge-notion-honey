@@ -314,6 +314,12 @@ describe("Matter", () => {
       expected: { smokeState: ALARM_STATE.CRITICAL, expressedState: EXPRESSED_STATE.SMOKE_ALARM },
     },
     {
+      shows: "smoke as a smoke alarm",
+      task: listener("a-alarm", "sensor-a", KIND.ALARM, "smoke"),
+      cluster: "smokeCoAlarm",
+      expected: { smokeState: ALARM_STATE.CRITICAL, expressedState: EXPRESSED_STATE.SMOKE_ALARM },
+    },
+    {
       shows: "a quiet smoke alarm",
       task: listener("a-alarm", "sensor-a", KIND.ALARM, "no_alarm"),
       cluster: "smokeCoAlarm",
@@ -358,6 +364,74 @@ describe("Matter", () => {
     });
     expect(homebridge.matter.read("Front door", "bridgedDeviceBasicInformation")).toEqual({ reachable: true });
     expect(homebridge.matter.read("Hallway", "bridgedDeviceBasicInformation")).toEqual({ reachable: false });
+  });
+
+  it.each([
+    {
+      shows: "a device as not reachable while its contact state is neither open nor closed",
+      task: "a-door",
+      sensor: "Front door",
+      cluster: "booleanState",
+      unknown: "needs_resync",
+      last: { stateValue: true },
+      known: "open",
+      next: { stateValue: false },
+    },
+    {
+      shows: "a leak sensor as not reachable while it cannot detect leaks",
+      task: "b-leak",
+      sensor: "Laundry",
+      cluster: "booleanState",
+      unknown: "short",
+      last: { stateValue: false },
+      known: "leak",
+      next: { stateValue: true },
+    },
+    {
+      shows: "a smoke alarm as not reachable while its state is neither alarm nor no alarm",
+      task: "c-alarm",
+      sensor: "Hallway",
+      cluster: "smokeCoAlarm",
+      unknown: "undefined",
+      last: { smokeState: ALARM_STATE.NORMAL, expressedState: EXPRESSED_STATE.NORMAL },
+      known: "alarm",
+      next: { smokeState: ALARM_STATE.CRITICAL, expressedState: EXPRESSED_STATE.SMOKE_ALARM },
+    },
+  ])("shows $shows", async ({ task, sensor, cluster, unknown, last, known, next }) => {
+    await homebridge.start(config());
+
+    notion.setValue(task, unknown);
+    await nextPoll();
+    expect(homebridge.matter.read(sensor, "bridgedDeviceBasicInformation")).toEqual({ reachable: false });
+    expect(homebridge.matter.read(sensor, cluster)).toEqual(last);
+
+    notion.setValue(task, known);
+    await nextPoll();
+    expect(homebridge.matter.read(sensor, "bridgedDeviceBasicInformation")).toEqual({ reachable: true });
+    expect(homebridge.matter.read(sensor, cluster)).toEqual(next);
+  });
+
+  it("registers a new device only once its contact state is open or closed", async () => {
+    notion.setValue("a-door", "calibrating_init");
+
+    await homebridge.start(config());
+    expect(Object.keys(homebridge.matter.devices()).sort()).toEqual(["Hallway", "Laundry"]);
+
+    notion.setValue("a-door", "closed");
+    await nextPoll();
+    expect(homebridge.matter.devices()["Front door"]).toEqual({
+      type: "BridgedNode",
+      parts: ["ContactSensor", "TemperatureSensor"],
+    });
+  });
+
+  it("shows a restored device as not reachable while its contact state is neither open nor closed", async () => {
+    await homebridge.start(config());
+    notion.setValue("a-door", "needs_resync");
+
+    const restarted = await restart();
+
+    expect(restarted.matter.read("Front door", "bridgedDeviceBasicInformation")).toEqual({ reachable: false });
   });
 
   it("sends only the values that changed on later polls", async () => {
