@@ -195,20 +195,27 @@ class FakeMatter {
   }
 }
 
-// A fake Homebridge that runs the plugin's platform with Matter turned on and HAP turned on or off.
+// "none" is Homebridge 1.x, which has neither `api.matter` nor `isMatterEnabled()`.
+type MatterMode = "on" | "off" | "none";
+
+// A fake Homebridge that runs the plugin's platform with HAP turned on or off and Matter in one of the `MatterMode`s.
 class FakeHomebridge {
   readonly hapAccessories = new Map<string, hap.Accessory>();
   readonly log = { info: vi.fn(), success: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
   readonly matter: FakeMatter;
   private readonly api;
 
-  constructor({ hapEnabled = false, cache = [] }: { hapEnabled?: boolean; cache?: Published[] } = {}) {
+  constructor({
+    hapEnabled = false,
+    matterMode = "on",
+    cache = [],
+  }: { hapEnabled?: boolean; matterMode?: MatterMode; cache?: Published[] } = {}) {
     this.matter = new FakeMatter(cache);
     this.api = Object.assign(new EventEmitter(), {
       hap,
       platformAccessory: hap.Accessory,
-      matter: this.matter.api,
       isHapEnabled: () => hapEnabled,
+      ...(matterMode === "none" ? {} : { matter: this.matter.api, isMatterEnabled: () => matterMode === "on" }),
       registerPlatform: vi.fn<(name: string, platform: PlatformPluginConstructor) => void>(),
       registerPlatformAccessories: (_plugin: string, _platform: string, added: hap.Accessory[]) => {
         for (const acc of added) this.hapAccessories.set(acc.UUID, acc);
@@ -598,5 +605,17 @@ describe("Matter", () => {
 
     expect(homebridge.hapAccessories.size).toBe(0);
     expect(Object.keys(homebridge.matter.devices())).toHaveLength(3);
+  });
+
+  it.each([
+    { when: "has Matter turned off for the bridge", matterMode: "off" },
+    { when: "has no Matter support", matterMode: "none" },
+  ] as const)("publishes nothing over Matter when Homebridge $when", async ({ matterMode }) => {
+    homebridge = new FakeHomebridge({ hapEnabled: true, matterMode });
+
+    await homebridge.start(config());
+
+    expect(homebridge.hapAccessories.size).toBe(3);
+    expect(homebridge.matter.devices()).toEqual({});
   });
 });

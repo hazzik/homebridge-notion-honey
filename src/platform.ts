@@ -48,7 +48,8 @@ export class NotionPlatform implements DynamicPlatformPlugin {
     this.log = log;
     this.api = api;
     this.hap = new HapSensors(log, api, PLUGIN_NAME, PLATFORM_NAME);
-    if (api.matter) this.matter = new MatterSensors(log, api.matter, PLUGIN_NAME, PLATFORM_NAME);
+    // Homebridge sets `api.matter` whenever `isMatterEnabled()` returns true.
+    if (this.isMatterEnabled()) this.matter = new MatterSensors(log, api.matter!, PLUGIN_NAME, PLATFORM_NAME);
 
     if (!config.email || !config.password) {
       this.log.error(
@@ -206,6 +207,11 @@ export class NotionPlatform implements DynamicPlatformPlugin {
   // Homebridge 2.0 to 2.4 has no `isHapEnabled()`.
   private isHapEnabled(): boolean {
     return this.api.isHapEnabled?.() ?? true;
+  }
+
+  // Homebridge 2.0 sets `api.matter` on the main bridge when only a child bridge has Matter.
+  private isMatterEnabled(): boolean {
+    return this.api.isMatterEnabled?.() ?? false;
   }
 
   private logFirstSync(sensorCount: number, activeCount: number, addedCount: number): void {
